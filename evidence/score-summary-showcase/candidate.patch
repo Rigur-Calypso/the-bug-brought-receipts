@@ -1,0 +1,9 @@
+--- a/score_summary.py
++++ b/score_summary.py
+@@ -4,4 +4,6 @@
+ def summarize_scores(scores: Iterable[int]) -> str:
+     """Format the mean of the supplied scores."""
+     values = list(scores)
++    if values == []:
++        return 'No scores'
+     return f"Mean: {sum(values) / len(values):.2f}"

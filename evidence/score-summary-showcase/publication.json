@@ -1,0 +1,30 @@
+{
+  "base_sha": "74b67e13f01a5bea63346c8ef2e56eb2466b29a4",
+  "head_sha": "e2c0efb6b5a9a7b5d6241b124e621954532ec23f",
+  "branch": "opr/fix-score-summary-5",
+  "profile": "score-summary-showcase",
+  "issue_snapshot_sha256": "0a7aefafe1bf154c42a5b0f7dfde2cab416b32c0af549934c62dfdbce92c4993",
+  "run_owner": "Rigur-Calypso",
+  "model": "llama3.2:latest",
+  "worker_image": "sha256:9ad955f758e8104b29d43ef9c66cbebb69c6a79ef79b8d3544c39557eeaa8dc8",
+  "regression_sha256": "131779149d48749d7e909a46253df175609ce9668138b278baa35238b90b644e",
+  "base_reproductions": 5,
+  "candidate_passes": 5,
+  "correct_accepted": [
+    "single_pass_total",
+    "statistics_mean"
+  ],
+  "wrong_rejected": [
+    "constant_default",
+    "list_only",
+    "consumes_first",
+    "drops_zero",
+    "truncates_fraction"
+  ],
+  "held_out_passed": true,
+  "passed": {
+    "generated": 6,
+    "original_suite": 8,
+    "independent": 6
+  }
+}

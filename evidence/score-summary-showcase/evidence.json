@@ -1,0 +1,258 @@
+{
+  "status": "verified",
+  "model": "llama3.2:latest",
+  "model_calls": 2,
+  "base_source_sha256": "8dffe2b709603e286e5e1e3035817477cc224ceac332b457708cf1a9c162a680",
+  "checks": [
+    {
+      "name": "Calibrate correct single_pass_total",
+      "passed": 6,
+      "expected_failures": []
+    },
+    {
+      "name": "Calibrate correct statistics_mean",
+      "passed": 6,
+      "expected_failures": []
+    },
+    {
+      "name": "Calibrate wrong constant_default",
+      "passed": 2,
+      "expected_failures": [
+        "consumes_every_iterator_item",
+        "zero_contributes",
+        "fractional_mean",
+        "negative_values"
+      ]
+    },
+    {
+      "name": "Calibrate wrong list_only",
+      "passed": 5,
+      "expected_failures": [
+        "empty_iterator"
+      ]
+    },
+    {
+      "name": "Calibrate wrong consumes_first",
+      "passed": 5,
+      "expected_failures": [
+        "consumes_every_iterator_item"
+      ]
+    },
+    {
+      "name": "Calibrate wrong drops_zero",
+      "passed": 5,
+      "expected_failures": [
+        "zero_contributes"
+      ]
+    },
+    {
+      "name": "Calibrate wrong truncates_fraction",
+      "passed": 5,
+      "expected_failures": [
+        "fractional_mean"
+      ]
+    },
+    {
+      "name": "Single empty-list assertion allows constant_default",
+      "passed": 1,
+      "expected_failures": []
+    },
+    {
+      "name": "Single empty-list assertion allows list_only",
+      "passed": 1,
+      "expected_failures": []
+    },
+    {
+      "name": "Single empty-list assertion allows consumes_first",
+      "passed": 1,
+      "expected_failures": []
+    },
+    {
+      "name": "Single empty-list assertion allows drops_zero",
+      "passed": 1,
+      "expected_failures": []
+    },
+    {
+      "name": "Single empty-list assertion allows truncates_fraction",
+      "passed": 1,
+      "expected_failures": []
+    },
+    {
+      "name": "Original suite allows consumes_first",
+      "passed": 2,
+      "expected_failures": []
+    },
+    {
+      "name": "Base original suite",
+      "passed": 2,
+      "expected_failures": []
+    },
+    {
+      "name": "Base reproduction 1/5",
+      "passed": 4,
+      "expected_failures": [
+        "empty_list",
+        "empty_iterator"
+      ]
+    },
+    {
+      "name": "Base reproduction 2/5",
+      "passed": 4,
+      "expected_failures": [
+        "empty_list",
+        "empty_iterator"
+      ]
+    },
+    {
+      "name": "Base reproduction 3/5",
+      "passed": 4,
+      "expected_failures": [
+        "empty_list",
+        "empty_iterator"
+      ]
+    },
+    {
+      "name": "Base reproduction 4/5",
+      "passed": 4,
+      "expected_failures": [
+        "empty_list",
+        "empty_iterator"
+      ]
+    },
+    {
+      "name": "Base reproduction 5/5",
+      "passed": 4,
+      "expected_failures": [
+        "empty_list",
+        "empty_iterator"
+      ]
+    },
+    {
+      "name": "Candidate pass 1/5",
+      "passed": 6,
+      "expected_failures": []
+    },
+    {
+      "name": "Candidate pass 2/5",
+      "passed": 6,
+      "expected_failures": []
+    },
+    {
+      "name": "Candidate pass 3/5",
+      "passed": 6,
+      "expected_failures": []
+    },
+    {
+      "name": "Candidate pass 4/5",
+      "passed": 6,
+      "expected_failures": []
+    },
+    {
+      "name": "Candidate pass 5/5",
+      "passed": 6,
+      "expected_failures": []
+    },
+    {
+      "name": "Candidate original suite",
+      "passed": 2,
+      "expected_failures": []
+    },
+    {
+      "name": "Candidate independent behavior",
+      "passed": 6,
+      "expected_failures": []
+    },
+    {
+      "name": "Frozen regression accepts single_pass_total",
+      "passed": 6,
+      "expected_failures": []
+    },
+    {
+      "name": "Frozen regression accepts statistics_mean",
+      "passed": 6,
+      "expected_failures": []
+    },
+    {
+      "name": "Frozen regression rejects constant_default",
+      "passed": 2,
+      "expected_failures": [
+        "single_pass",
+        "zero",
+        "fraction",
+        "negative"
+      ]
+    },
+    {
+      "name": "Frozen regression rejects list_only",
+      "passed": 5,
+      "expected_failures": [
+        "empty_iterator"
+      ]
+    },
+    {
+      "name": "Frozen regression rejects consumes_first",
+      "passed": 5,
+      "expected_failures": [
+        "single_pass"
+      ]
+    },
+    {
+      "name": "Frozen regression rejects drops_zero",
+      "passed": 5,
+      "expected_failures": [
+        "zero"
+      ]
+    },
+    {
+      "name": "Frozen regression rejects truncates_fraction",
+      "passed": 5,
+      "expected_failures": [
+        "fraction"
+      ]
+    },
+    {
+      "name": "Held-out mixed-sign iterator",
+      "passed": 1,
+      "expected_failures": []
+    }
+  ],
+  "worker_image": "sha256:891afc5aa536b20624f78b4d2afc41d906351a169e18d8a678a77513a705cc2a",
+  "weak_regression_sha256": "7ea7787beca866dcbf4e6afd3775a591df2cf725fc5c62bba2966e1eda187210",
+  "weak_survivors": [
+    "constant_default",
+    "list_only",
+    "consumes_first",
+    "drops_zero",
+    "truncates_fraction"
+  ],
+  "regression_sha256": "131779149d48749d7e909a46253df175609ce9668138b278baa35238b90b644e",
+  "selected_probes": [
+    "fraction",
+    "negative",
+    "single_pass",
+    "zero",
+    "empty_iterator",
+    "empty_list"
+  ],
+  "hardening_rounds": 1,
+  "base_reproductions": 5,
+  "candidate_proposal": {
+    "condition": "values == []",
+    "empty_result": "No scores"
+  },
+  "candidate_passes": 5,
+  "correct_accepted": [
+    "single_pass_total",
+    "statistics_mean"
+  ],
+  "wrong_rejected": [
+    "constant_default",
+    "list_only",
+    "consumes_first",
+    "drops_zero",
+    "truncates_fraction"
+  ],
+  "held_out_passed": true,
+  "candidate_source_sha256": "121730cb9366adf1081caedc4e59b8c345119f0e2eeec82a241e6ee0c9049d38",
+  "seconds": 16.62
+}

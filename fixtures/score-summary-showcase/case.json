@@ -1,0 +1,10 @@
+{
+  "repository": "Rigur-Calypso/museum-of-off-by-ones",
+  "issue_number": 5,
+  "seed_sha": "bb9ecdf9edc95f2b264258548c9c9a61e73140d5",
+  "source": "score_summary.py",
+  "baseline": "tests/test_score_summary.py",
+  "regression": "tests/test_score_summary_regression.py",
+  "branch": "opr/fix-score-summary-5",
+  "title": "Handle empty score iterables"
+}

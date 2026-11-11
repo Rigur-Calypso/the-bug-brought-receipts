@@ -1,0 +1,10 @@
+{
+  "repository": "Rigur-Calypso/museum-of-off-by-ones",
+  "issue_number": 1,
+  "seed_sha": "4d9bca660f201a19eca4059ac098f5b478ba47a0",
+  "source": "pagination.py",
+  "baseline": "tests/test_pagination.py",
+  "regression": "tests/test_pagination_regression.py",
+  "branch": "opr/fix-pagination-1",
+  "title": "Count the final partial page"
+}

@@ -1,0 +1,16 @@
+{
+  "base_sha": "ca19c827f45ed7234de6866d91df373a72dfcecc",
+  "head_sha": "fbbdd1120653682d38e7606bbedd68ee8fade14c",
+  "branch": "opr/fix-pagination-1",
+  "issue_snapshot_sha256": "cdf35eab1bede9b422be81a566d1ce1d76b8237aa0f0621ad65188b85d3e3971",
+  "run_owner": "Rigur-Calypso",
+  "model": "llama3.2:latest",
+  "worker_image": "sha256:001fa56d3a50aeb44e5bf5eedce4a053875b11c09c9ffe1b8fd660b86d39f1fc",
+  "regression_sha256": "77ed5e64d34926d3d3ebbe467c42286b8eb67889d406e0a99ec830a7010f86f9",
+  "base_regression_expected_failures": 1,
+  "passed": {
+    "generated": 2,
+    "original_suite": 6,
+    "independent": 2
+  }
+}
