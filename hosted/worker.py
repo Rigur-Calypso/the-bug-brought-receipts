@@ -56,7 +56,7 @@ def run_next(verify):
     state, message, evidence = State.FAILED, '', {}
     try:
         checkpoint()
-        evidence = verify(checkpoint)
+        evidence = verify(run.sample, checkpoint)
         state = State.VERIFIED
     except Stopped:
         pass

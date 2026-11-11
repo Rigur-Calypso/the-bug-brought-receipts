@@ -3,12 +3,12 @@
 {% block content %}
 <p><a href="{% url 'sample-home' %}">← Sample repair</a></p>
 <h1>{{ run.get_state_display }}</h1>
-<p class="muted">Pagination · Sample repository</p>
+<p class="muted">{{ run.get_sample_display }}</p>
 <section class="panel" data-state="{{ run.state }}" data-status="{% url 'sample-status' run.pk %}">
   {% if run.state == 'verified' %}
   <h2>Fresh verification results</h2>
   {% if run.evidence.patch %}
-  <p>The new regression reproduced the missing page on the original commit and passed with the generated patch.</p>
+  <p>The new regression reproduced the reported bug on the original commit and passed with the generated patch.</p>
   {% else %}
   <p>The regression reproduced the missing page on the original commit and passed on the recorded fix.</p>
   {% endif %}

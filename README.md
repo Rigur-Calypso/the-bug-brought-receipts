@@ -10,7 +10,7 @@ controls the merge on the protected default branch.
 ## Run the local browser prototype
 
 The prototype uses Ollama to generate a patch and regression test for the
-fixed pagination sample. Docker runs the test on the original code and
+pagination or Click sample. Docker runs the test on the original code and
 checks the generated fix. Download both files from the verified result.
 
 Use a running Docker Desktop installation, Ollama with `llama3.2:latest`,
@@ -25,10 +25,17 @@ python3 -m venv .venv
 ```
 
 Open [the prototype](http://127.0.0.1:8765) and sign in as `local-operator`
-with the generated password in `.local/operator-password`. Select **Generate
-and test a fix**. Recent runs and downloads are saved locally in
+with the generated password in `.local/operator-password`. Choose a sample
+and select **Generate and test a fix**. Recent runs and downloads are saved locally in
 `.local/sample.sqlite3`. Press Ctrl-C in the launcher terminal to stop the
 prototype, and run the same script to restart it.
+
+To enable the Click sample on another checkout, fetch its pinned release once.
+Set `OPR_CLICK_REPOSITORY` if you keep it in a different location.
+
+```sh
+git clone --depth 1 --branch 8.2.1 https://github.com/pallets/click.git .local/click-8.2.1
+```
 
 The launcher uses a loopback Ollama endpoint on port 11435 and starts Ollama
 if needed. If the model is missing, follow its local download command. Use

@@ -8,7 +8,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
 
-from .models import ACTIVE_STATES, Run, RunRequest, State
+from .models import ACTIVE_STATES, Run, RunRequest, Sample, State
 
 
 def operator_required(view):
@@ -19,7 +19,8 @@ def operator_required(view):
 @require_GET
 def home(request):
     return render(request, 'hosted/home.html', {
-        'request_id': uuid4(), 'runs': Run.objects.filter(owner=request.user).order_by('-created_at')[:10],
+        'request_id': uuid4(), 'samples': Sample.choices,
+        'runs': Run.objects.filter(owner=request.user).order_by('-created_at')[:10],
     })
 
 
@@ -30,15 +31,20 @@ def start(request):
         key = UUID(request.POST.get('request_id', ''))
     except ValueError:
         return HttpResponseBadRequest('Open the sample page and try again.')
+    sample = request.POST.get('sample', Sample.PAGINATION)
+    if sample not in Sample.values:
+        return HttpResponseBadRequest('Choose a sample from the list.')
 
     with transaction.atomic():
         owner = get_user_model().objects.select_for_update().get(pk=request.user.pk)
         previous = RunRequest.objects.filter(owner=owner, key=key).first()
         if previous:
+            if previous.run.sample != sample:
+                return HttpResponseBadRequest('Open the sample page again before choosing a different sample.')
             return redirect('sample-run', run_id=previous.run_id)
-        run = Run.objects.filter(owner=owner, state__in=ACTIVE_STATES).first()
+        run = Run.objects.filter(owner=owner, sample=sample, state__in=ACTIVE_STATES).first()
         if run is None:
-            run = Run.objects.create(owner=owner)
+            run = Run.objects.create(owner=owner, sample=sample)
         RunRequest.objects.create(owner=owner, key=key, run=run)
     return redirect('sample-run', run_id=run.pk)
 
@@ -61,7 +67,7 @@ def status(request, run_id):
 @require_GET
 def download(request, run_id, artifact):
     run = get_object_or_404(Run, pk=run_id, owner=request.user, state=State.VERIFIED)
-    filename = {'patch': 'pagination.patch', 'regression': 'test_pagination_regression.py'}.get(artifact)
+    filename = {'patch': f'{run.sample}.patch', 'regression': f'test_{run.sample}_regression.py'}.get(artifact)
     if filename is None or not run.evidence.get(artifact):
         raise Http404
     return HttpResponse(run.evidence[artifact], content_type='text/plain; charset=utf-8', headers={

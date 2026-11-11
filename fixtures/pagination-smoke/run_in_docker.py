@@ -16,8 +16,9 @@ from pathlib import Path
 from pagination_generation import CASE_SCHEMA, MODEL, patch_source, propose, render_regression, time_left
 
 
-DOCKERFILE = """\
-FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90
+PYTHON_IMAGE = "python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90"
+DOCKERFILE = f"""\
+FROM {PYTHON_IMAGE}
 RUN python -m pip install --no-cache-dir pytest==9.1.1
 """
 FIXTURE = Path(__file__).resolve().parent
@@ -130,9 +131,9 @@ def stage_pagination_seed(repository, revision, directory, *, checkpoint=None):
     shutil.copyfile(FIXTURE / CONTROL_FILE, directory / CONTROL_FILE)
 
 
-def build_image(timeout=180):
+def build_image(timeout=180, *, dockerfile=DOCKERFILE):
     return subprocess.check_output(
-        ["docker", "build", "--quiet", "-"], input=DOCKERFILE, text=True, timeout=timeout,
+        ["docker", "build", "--quiet", "-"], input=dockerfile, text=True, timeout=timeout,
     ).strip()
 
 

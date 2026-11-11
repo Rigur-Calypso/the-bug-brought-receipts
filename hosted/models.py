@@ -16,9 +16,15 @@ class State(models.TextChoices):
 ACTIVE_STATES = (State.QUEUED, State.RUNNING, State.CANCELLING)
 
 
+class Sample(models.TextChoices):
+    PAGINATION = 'pagination', 'Pagination · final partial page'
+    CLICK = 'click', 'Click 8.2.1 · enum default in --help'
+
+
 class Run(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    sample = models.CharField(max_length=12, choices=Sample, default=Sample.PAGINATION)
     state = models.CharField(max_length=12, choices=State, default=State.QUEUED)
     created_at = models.DateTimeField(auto_now_add=True)
     lease_until = models.DateTimeField(null=True)
@@ -27,7 +33,8 @@ class Run(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(
-            fields=['owner'], condition=models.Q(state__in=ACTIVE_STATES), name='one_active_sample_per_owner',
+            fields=['owner', 'sample'], condition=models.Q(state__in=ACTIVE_STATES),
+            name='one_active_run_per_owner_and_sample',
         )]
 
     @property
