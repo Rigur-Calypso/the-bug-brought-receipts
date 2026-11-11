@@ -1,0 +1,22 @@
+{% extends 'hosted/base.html' %}
+{% block content %}
+<h1>Verify a sample repair</h1>
+<section class="panel" aria-labelledby="sample-title">
+  <h2 id="sample-title">Pagination misses the final partial page</h2>
+  <p>A list of 21 items with 10 items per page needs three pages. The original code returned two.</p>
+  <p class="muted">Run fresh checks on the sample repository’s recorded fix. You can leave this page and return to the result.</p>
+  <form method="post" action="{% url 'sample-start' %}">
+    {% csrf_token %}
+    <input type="hidden" name="request_id" value="{{ request_id }}">
+    <button>Verify sample repair</button>
+  </form>
+</section>
+{% if runs %}
+<h2>Recent runs</h2>
+<ul>
+  {% for run in runs %}
+  <li><a href="{% url 'sample-run' run.pk %}">{{ run.get_state_display }}</a> · {{ run.created_at|date:'M j, H:i T' }}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

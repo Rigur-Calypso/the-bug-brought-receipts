@@ -7,6 +7,42 @@ repair with a local model, verifies the exact candidate in Docker, and opens
 a draft pull request through a repository-scoped GitHub App. A human reviewer
 controls the merge on the protected default branch.
 
+## Try the local browser preview
+
+The preview reruns Docker verification of the recorded pagination draft.
+It displays the new test results beside a link to the original GitHub PR.
+Use it with a local copy of the sample repository and a running Docker daemon.
+
+In a Python virtual environment, install the web dependency and prepare the
+local database and operator account. Keep the generated secret consistent
+across the web and worker processes.
+
+```sh
+python -m pip install -r requirements-web.txt
+export DJANGO_SETTINGS_MODULE=hosted.settings
+export OPR_LOCAL_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+python -m django migrate
+python -m django createsuperuser
+```
+
+Fetch the original draft commit in the sample checkout, then start the worker
+and the loopback server. If you run them in separate terminals, set the same
+`DJANGO_SETTINGS_MODULE` and `OPR_LOCAL_SECRET_KEY` in both.
+
+```sh
+export OPR_SAMPLE_REPOSITORY=../museum-of-off-by-ones
+git -C "$OPR_SAMPLE_REPOSITORY" fetch origin refs/pull/4/head
+python -m django sample_worker &
+python -m django runserver 127.0.0.1:8000
+```
+
+Open [the local preview](http://127.0.0.1:8000), sign in, and select
+**Verify sample repair**. The run stays in SQLite and can be reopened after
+signing out. Stop both development processes when finished. Run the web
+suite with `python -m django test hosted` using the environment above.
+The [RIG-14 implementation plan](docs/superpowers/plans/2026-11-12-hosted-sample.md)
+tracks hosted sign-in, inference, sandboxing, and fresh draft publication.
+
 ## What we verified
 
 | Case | Measured evidence | GitHub |

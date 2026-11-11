@@ -1,0 +1,44 @@
+{% extends 'hosted/base.html' %}
+{% block title %}{{ run.get_state_display }}{% endblock %}
+{% block content %}
+<p><a href="{% url 'sample-home' %}">← Sample repair</a></p>
+<h1>{{ run.get_state_display }}</h1>
+<p class="muted">Pagination · Sample repository</p>
+<section class="panel" data-state="{{ run.state }}" data-status="{% url 'sample-status' run.pk %}">
+  {% if run.state == 'verified' %}
+  <h2>Fresh verification results</h2>
+  <p>The regression reproduced the missing page on the original commit and passed on the recorded fix.</p>
+  <ul>
+    <li>{{ run.evidence.passed.generated }} regression tests passed</li>
+    <li>{{ run.evidence.passed.original_suite }} original tests passed</li>
+    <li>{{ run.evidence.passed.independent }} independent checks passed</li>
+  </ul>
+  {% if run.evidence.head_sha %}<p>Verified commit <code>{{ run.evidence.head_sha }}</code></p>{% endif %}
+  <a class="action" href="https://github.com/Rigur-Calypso/museum-of-off-by-ones/pull/4">Original draft PR</a>
+  <p class="muted">Published during the hackathon. Access requires permission to the sample repository.</p>
+  {% elif run.message %}
+  <p>{{ run.message }}</p>
+  {% elif run.active %}
+  <p>The worker will save your result here. You can close this page.</p>
+  {% endif %}
+  {% if run.state == 'queued' or run.state == 'running' %}
+  <form method="post" action="{% url 'sample-cancel' run.pk %}">
+    {% csrf_token %}<button class="secondary">Cancel verification</button>
+  </form>
+  {% endif %}
+</section>
+{% if run.active %}
+<script>
+  const panel = document.querySelector('[data-status]');
+  async function poll() {
+    try {
+      const response = await fetch(panel.dataset.status, {cache: 'no-store', redirect: 'manual', signal: AbortSignal.timeout(5000)});
+      if (response.type === 'opaqueredirect' || response.status === 404) { location.reload(); return; }
+      if (response.ok && (await response.json()).state !== panel.dataset.state) { location.reload(); return; }
+    } catch { /* A later poll can recover after a connection drop. */ }
+    setTimeout(poll, 2500);
+  }
+  setTimeout(poll, 2500);
+</script>
+{% endif %}
+{% endblock %}

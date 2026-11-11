@@ -89,8 +89,10 @@ def run_phase(name, image, staged, tests, expected, expected_errors=(), *, timeo
         raise VerificationError(f"{name} returned unexpected test results (exit {result.returncode}).\n{report[-1600:]}")
 
 
-def stage_files(repository, revision, directory, paths):
+def stage_files(repository, revision, directory, paths, *, checkpoint=None):
     for path in paths:
+        if checkpoint is not None:
+            checkpoint()
         target = directory / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(subprocess.check_output(
@@ -104,7 +106,7 @@ def build_image(timeout=180):
     ).strip()
 
 
-def verify_committed_repair(repository, base, head, regression_sha256):
+def verify_committed_repair(repository, base, head, regression_sha256, *, image=None, checkpoint=None):
     """Verify the exact committed source and regression before publishing."""
     original_paths = ("pagination.py", "tests/test_pagination.py")
     regression = "tests/test_pagination_regression.py"
@@ -116,19 +118,25 @@ def verify_committed_repair(repository, base, head, regression_sha256):
     with tempfile.TemporaryDirectory(prefix="opr-publish-check-") as directory:
         stage = Path(directory).resolve()
         buggy, fixed = stage / "buggy", stage / "fixed"
-        stage_files(repository, base, buggy, original_paths)
-        stage_files(repository, head, fixed, (*original_paths, regression))
+        stage_files(repository, base, buggy, original_paths, checkpoint=checkpoint)
+        stage_files(repository, head, fixed, (*original_paths, regression), checkpoint=checkpoint)
         test_bytes = (fixed / regression).read_bytes()
         if hashlib.sha256(test_bytes).hexdigest() != regression_sha256:
             raise VerificationError("The committed regression differs from the frozen test")
         (buggy / regression).write_bytes(test_bytes)
         shutil.copyfile(Path(__file__).with_name("expected_behavior.py"), fixed / "expected_behavior.py")
-        image = build_image()
-        run_phase("Base baseline suite", image, buggy, ["tests/test_pagination.py"], baseline)
-        run_phase("Committed regression on base", image, buggy, [reported], {reported: "FAILED"}, ("assert 2 == 3",))
-        run_phase("Committed regression on candidate", image, fixed, [regression], generated)
-        run_phase("Original suite on committed candidate", image, fixed, ["tests/test_pagination.py"], baseline)
-        run_phase("Independent checks on committed candidate", image, fixed, ["expected_behavior.py"], controls)
+        image = image or build_image()
+
+        def verify(name, directory, tests, expected, errors=()):
+            if checkpoint is not None:
+                checkpoint()
+            run_phase(name, image, directory, tests, expected, errors)
+
+        verify("Base baseline suite", buggy, ["tests/test_pagination.py"], baseline)
+        verify("Committed regression on base", buggy, [reported], {reported: "FAILED"}, ("assert 2 == 3",))
+        verify("Committed regression on candidate", fixed, [regression], generated)
+        verify("Original suite on committed candidate", fixed, ["tests/test_pagination.py"], baseline)
+        verify("Independent checks on committed candidate", fixed, ["expected_behavior.py"], controls)
     return {
         "worker_image": image,
         "regression_sha256": regression_sha256,
