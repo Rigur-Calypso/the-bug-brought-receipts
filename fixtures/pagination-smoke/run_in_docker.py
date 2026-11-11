@@ -137,7 +137,7 @@ def build_image(timeout=180, *, dockerfile=DOCKERFILE):
     ).strip()
 
 
-def verify_committed_repair(repository, base, head, regression_sha256):
+def verify_committed_repair(repository, base, head, regression_sha256, *, image=None, checkpoint=None):
     """Verify the exact committed source and regression before publishing."""
     regression = "tests/test_pagination_regression.py"
     reported = f"{regression}::{REPORTED_TEST}"
@@ -146,19 +146,24 @@ def verify_committed_repair(repository, base, head, regression_sha256):
     with tempfile.TemporaryDirectory(prefix="opr-publish-check-") as directory:
         stage = Path(directory).resolve()
         buggy, fixed = stage / "buggy", stage / "fixed"
-        stage_files(repository, base, buggy, ORIGINAL_FILES)
-        stage_files(repository, head, fixed, (*ORIGINAL_FILES, regression))
+        stage_files(repository, base, buggy, ORIGINAL_FILES, checkpoint=checkpoint)
+        stage_files(repository, head, fixed, (*ORIGINAL_FILES, regression), checkpoint=checkpoint)
         test_bytes = (fixed / regression).read_bytes()
         if hashlib.sha256(test_bytes).hexdigest() != regression_sha256:
             raise VerificationError("The committed regression differs from the frozen test")
         (buggy / regression).write_bytes(test_bytes)
         shutil.copyfile(FIXTURE / CONTROL_FILE, fixed / CONTROL_FILE)
-        image = build_image()
-        run_phase("Base baseline suite", image, buggy, [BASELINE_FILE], BASELINE_RESULTS)
-        run_phase("Committed regression on base", image, buggy, [reported], {reported: "FAILED"}, ("assert 2 == 3",))
-        run_phase("Committed regression on candidate", image, fixed, [regression], generated)
-        run_phase("Original suite on committed candidate", image, fixed, [BASELINE_FILE], BASELINE_RESULTS)
-        run_phase("Independent checks on committed candidate", image, fixed, [CONTROL_FILE], CONTROL_RESULTS)
+        image = image or build_image()
+        for name, source, tests, results, errors in (
+            ("Base baseline suite", buggy, [BASELINE_FILE], BASELINE_RESULTS, ()),
+            ("Committed regression on base", buggy, [reported], {reported: "FAILED"}, ("assert 2 == 3",)),
+            ("Committed regression on candidate", fixed, [regression], generated, ()),
+            ("Original suite on committed candidate", fixed, [BASELINE_FILE], BASELINE_RESULTS, ()),
+            ("Independent checks on committed candidate", fixed, [CONTROL_FILE], CONTROL_RESULTS, ()),
+        ):
+            if checkpoint is not None:
+                checkpoint()
+            run_phase(name, image, source, tests, results, errors)
     return {
         "worker_image": image,
         "regression_sha256": regression_sha256,

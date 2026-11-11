@@ -1,11 +1,17 @@
+from contextlib import nullcontext
 from datetime import timedelta
+from types import SimpleNamespace
+from unittest.mock import patch
 from uuid import uuid4
 
 from django.contrib.auth import get_user_model
+from django.core import signing
 from django.test import Client, TestCase
 from django.utils import timezone
 
+from . import github_demo
 from .models import Run
+from .views import ISSUE_SALT
 from .worker import run_next
 
 
@@ -98,8 +104,8 @@ class SampleFlowTests(TestCase):
         self.assertNotEqual(pagination.url, click.url)
         self.assertContains(self.client.get(click.url), 'Click 8.2.1')
 
-        def verify(sample, checkpoint):
-            return {'patch': f'{sample} patch', 'regression': f'{sample} test'}
+        def verify(run, checkpoint):
+            return {'patch': f'{run.sample} patch', 'regression': f'{run.sample} test'}
 
         run_next(verify)
         run_next(verify)
@@ -119,3 +125,50 @@ class SampleFlowTests(TestCase):
         key = uuid4()
         self.assertEqual(self.start(key).status_code, 302)
         self.assertEqual(self.start(key, sample='click').status_code, 400)
+
+    def test_github_runs_require_an_operator_and_a_signed_issue(self):
+        self.assertEqual(self.client.get('/github/').status_code, 404)
+        operator = get_user_model().objects.create_user('local-operator', is_staff=True)
+        self.client.force_login(operator)
+        self.assertEqual(self.start(sample='github_pagination').status_code, 400)
+        self.assertFalse(Run.objects.exists())
+        issue = {'issue': {'title': 'Example issue'}, 'base_sha': 'a' * 40}
+        fields = {'request_id': uuid4(), 'sample': 'github_pagination',
+                  'issue_ticket': signing.dumps(issue, salt=ISSUE_SALT)}
+        response = self.client.post('/runs/', fields)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Run.objects.get().github_issue, issue)
+        self.assertEqual(self.client.post('/runs/', fields).url, response.url)
+
+    def test_only_a_verified_github_run_can_publish_and_retries_reuse_the_link(self):
+        operator = get_user_model().objects.create_user('local-operator', is_staff=True)
+        self.client.force_login(operator)
+        run = Run.objects.create(
+            owner=operator, sample='github_pagination',
+            github_issue={'issue': {'title': 'Example issue'}},
+            evidence={'patch': 'Verified patch'},
+        )
+        url = f'/runs/{run.pk}/publish/'
+        self.assertEqual(self.client.post(url).status_code, 404)
+        run.state = 'verified'
+        run.save(update_fields=['state'])
+        draft_url = 'https://github.com/Rigur-Calypso/museum-of-off-by-ones/pull/12'
+        with patch('hosted.github_demo.open_draft', return_value=draft_url) as publish:
+            self.assertEqual(self.client.post(url).status_code, 302)
+            self.assertEqual(self.client.post(url).status_code, 302)
+            publish.assert_called_once()
+        self.assertContains(self.client.get(f'/runs/{run.pk}/'), draft_url)
+
+    def test_publisher_stops_before_remote_writes_when_the_base_moves(self):
+        case = dict(github_demo.CASE, branch='opr/browser-test')
+        record = {'base_sha': 'a' * 40, 'head_sha': 'b' * 40, 'branch': case['branch'],
+                  'issue_snapshot_sha256': github_demo.APPROVED_ISSUE}
+        live = dict(record, ref='main', base_sha='c' * 40)
+        with (
+            patch('publish_repair.git', return_value=record['base_sha']),
+            patch('publish_repair.scoped_installation', return_value=nullcontext(('test-token', 'demo[bot]'))),
+            patch('publish_repair.github') as github,
+        ):
+            with self.assertRaisesMessage(github_demo.VerificationError, 'base or issue changed'):
+                github_demo.publish_verified(SimpleNamespace(repository='checkout'), case, record, lambda _token: live)
+            github.assert_not_called()

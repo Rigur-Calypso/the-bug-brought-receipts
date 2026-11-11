@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlencode
@@ -52,7 +53,7 @@ def b64url(data):
     return base64.urlsafe_b64encode(data).rstrip(b"=")
 
 
-def app_token(args, owner, repository):
+def app_token(args, owner, repository, *, write=True):
     now = int(time.time())
     unsigned = b".".join((
         b64url(b'{"alg":"RS256","typ":"JWT"}'),
@@ -73,16 +74,30 @@ def app_token(args, owner, repository):
         or installation.get("suspended_at") is not None
     ):
         raise VerificationError("GitHub did not confirm the expected App installation")
+    access = "write" if write else "read"
     credentials = github(
         f"/app/installations/{args.installation_id}/access_tokens", jwt, method="POST",
-        data={"repositories": [repository], "permissions": {"contents": "write", "issues": "read", "pull_requests": "write"}},
+        data={"repositories": [repository], "permissions": {"contents": access, "issues": "read", "pull_requests": access}},
     )
     return credentials["token"], f"{app['slug']}[bot]"
 
 
+@contextmanager
+def scoped_installation(args, full_name, *, write=True):
+    owner, repository = full_name.split("/")
+    token, author = app_token(args, owner, repository, write=write)
+    try:
+        scope = github("/installation/repositories", token)
+        if scope["total_count"] != 1 or scope["repositories"][0]["full_name"].casefold() != full_name.casefold():
+            raise VerificationError("The publisher token must be scoped to the demo repository")
+        yield token, author
+    finally:
+        github("/installation/token", token, method="DELETE")
+
+
 def git(repository, *arguments):
     return subprocess.check_output(
-        ["git", "-C", repository, *arguments], text=True, timeout=30,
+        ["git", "-C", repository, "-c", "core.hooksPath=/dev/null", *arguments], text=True, timeout=30,
     ).strip()
 
 
@@ -104,7 +119,11 @@ def prepare_commit(repository, run, base, case):
             shutil.copyfile(run / "generated_regression.py", regression)
             git(checkout, "add", "--", case["source"], case["regression"])
             git(checkout, "diff", "--cached", "--check")
-            git(checkout, "-c", "commit.gpgsign=false", "commit", "-m", case["title"])
+            git(
+                checkout, "-c", "commit.gpgsign=false",
+                "-c", "user.name=OpenPRBugResolver", "-c", "user.email=openprbugresolver@users.noreply.github.com",
+                "commit", "-m", case["title"],
+            )
             return git(checkout, "rev-parse", "HEAD")
         finally:
             git(repository, "worktree", "remove", "--force", str(checkout))
@@ -148,8 +167,6 @@ def draft_body(record):
 
 
 def publish(args, case, issue_url):
-    owner, repository = case["repository"].split("/")
-    repo_api = f"/repos/{case['repository']}"
     generation = json.loads((args.run / "evidence.json").read_text())
     if generation["status"] != "verified":
         raise VerificationError("Use verified generation evidence for the enrolled case")
@@ -205,19 +222,22 @@ def publish(args, case, issue_url):
         temporary_plan.write_text(json.dumps(record, indent=2) + "\n")
         temporary_plan.replace(plan)
 
+    draft_url = publish_verified(args, case, record, lambda _token: intake_issue(issue_url))
+    print(f"Verified draft {draft_url} at {head}")
+
+
+def publish_verified(args, case, record, read_current):
+    """Publish the exact verified head, or recover its existing draft after a retry."""
+    owner = case["repository"].split("/")[0]
+    repo_api = f"/repos/{case['repository']}"
+    head, base, branch = record["head_sha"], record["base_sha"], case["branch"]
     if git(args.repository, "rev-parse", f"{head}^") != base or record["branch"] != branch:
         raise VerificationError("The recorded candidate does not match the pinned base and branch")
 
-    token, author = app_token(args, owner, repository)
-    try:
-        scope = github("/installation/repositories", token)
-        if scope["total_count"] != 1 or scope["repositories"][0]["full_name"].casefold() != case["repository"].casefold():
-            raise VerificationError("The publisher token must be scoped to the demo repository")
-
+    with scoped_installation(args, case["repository"]) as (token, author):
         def check_current():
-            main = github(f"{repo_api}/git/ref/heads/main", token)
-            live = intake_issue(issue_url)
-            if main["object"]["sha"] != base or live["base_sha"] != base or live["issue_snapshot_sha256"] != record["issue_snapshot_sha256"]:
+            live = read_current(token)
+            if live["ref"] != "main" or live["base_sha"] != base or live["issue_snapshot_sha256"] != record["issue_snapshot_sha256"]:
                 raise VerificationError("The base or issue changed before publication")
 
         check_current()
@@ -229,6 +249,7 @@ def publish(args, case, issue_url):
             subprocess.run(
                 [
                     "git", "-C", args.repository, "-c", "credential.helper=",
+                    "-c", "core.hooksPath=/dev/null",
                     "-c", "credential.helper=!gh auth git-credential", "push",
                     f"--force-with-lease={branch_ref}:",
                     f"https://github.com/{case['repository']}.git", f"{head}:{branch_ref}",
@@ -254,9 +275,7 @@ def publish(args, case, issue_url):
             or draft["user"]["login"].casefold() != author.casefold() or not draft["draft"]
         ):
             raise VerificationError("GitHub returned a PR with unexpected revision, author, or draft state")
-        print(f"Verified draft {draft['html_url']} at {head}")
-    finally:
-        github("/installation/token", token, method="DELETE")
+        return f"https://github.com/{case['repository']}/pull/{int(draft['number'])}"
 
 
 def main():

@@ -13,6 +13,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import close_old_connections
 
+from hosted import github_demo
 from hosted.models import Sample
 from hosted.worker import SampleFailure, run_next
 
@@ -87,23 +88,37 @@ class Command(BaseCommand):
                 except (OSError, subprocess.SubprocessError) as error:
                     self.stderr.write(f'{sample} sandbox setup failed: {error}')
 
-        def verify_pagination(checkpoint):
+        def verify_pagination(run, checkpoint):
             deadline = time.monotonic() + 600
+            input_issue = run.github_issue or intake
+            revision = input_issue['base_sha']
+            if run.github_issue:
+                checkpoint()
+                try:
+                    changed = github_demo.git(
+                        repository, 'diff', '--name-only', base, revision, '--', 'pagination.py', 'tests/test_pagination.py',
+                    )
+                except subprocess.CalledProcessError as error:
+                    raise SampleFailure('The pinned GitHub commit is missing locally. Refresh the demo checkout and retry.') from error
+                if changed:
+                    raise SampleFailure('The enrolled source or tests changed on GitHub. The demo case needs to be reviewed again.')
             with tempfile.TemporaryDirectory(prefix='opr-local-repair-') as directory:
                 stage = Path(directory).resolve()
                 buggy, output = stage / 'buggy', stage / 'output'
                 output.mkdir()
-                stage_pagination_seed(repository, base, buggy, checkpoint=checkpoint)
+                stage_pagination_seed(repository, revision, buggy, checkpoint=checkpoint)
                 checkpoint()
                 run_phase('Baseline on original commit', image, buggy, ['tests'], BASELINE_RESULTS)
                 evidence = verify_generated_repair(
-                    image, buggy, output, intake, port, deadline, checkpoint=checkpoint,
+                    image, buggy, output, input_issue, port, deadline, checkpoint=checkpoint,
                 )
+                committed = github_demo.verify_candidate(run, repository, output, image, evidence, checkpoint) if run.github_issue else {}
                 return {
-                    'base_sha': base,
+                    'base_sha': revision,
                     'passed': evidence['passed'],
                     'patch': (output / 'candidate.patch').read_text(),
                     'regression': (output / 'generated_regression.py').read_text(),
+                    **committed,
                 }
 
         def verify_external(sample, checkpoint):
@@ -144,11 +159,11 @@ class Command(BaseCommand):
                     'regression': (output / 'generated_regression.py').read_text(),
                 }
 
-        def verify(sample, checkpoint):
+        def verify(run, checkpoint):
             try:
-                if sample == Sample.PAGINATION:
-                    return verify_pagination(checkpoint)
-                return verify_external(sample, checkpoint)
+                if run.sample in (Sample.PAGINATION, Sample.GITHUB_PAGINATION):
+                    return verify_pagination(run, checkpoint)
+                return verify_external(run.sample, checkpoint)
             except URLError as error:
                 raise SampleFailure('The local Ollama model is unavailable. Check Ollama and start a new run.') from error
             except (TimeoutError, subprocess.TimeoutExpired) as error:

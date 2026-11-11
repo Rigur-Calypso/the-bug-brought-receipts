@@ -30,6 +30,27 @@ and select **Generate and test a fix**. Recent runs and downloads are saved loca
 `.local/sample.sqlite3`. Press Ctrl-C in the launcher terminal to stop the
 prototype, and run the same script to restart it.
 
+### Repair the enrolled GitHub issue
+
+Use the private GitHub App installed on the demo repository only. Give it
+Issues read, Contents read/write, and Pull requests read/write. Create
+`.local/github-demo.json` with numeric `app_id`, numeric `installation_id`,
+and `private_key` set to the absolute path of the App's private key. Keep the
+key outside this checkout. The sibling checkout must contain the current
+GitHub `main` commit and the fixture seed. If the local checkout falls behind,
+fetch `main` before starting a new run.
+
+Sign in as `local-operator`, open **View GitHub issue**, and select **Generate
+and test a fix**. The worker records the issue and current commit, then
+retests the exact candidate commit in Docker. Choose **Open draft pull request**
+from the verified result. Retrying that run uses the same candidate and branch.
+The App refuses publication if the issue or base changed during the run.
+Review the draft on GitHub using the repository's protected-branch workflow.
+
+This path uses the demo issue and the local operator account. Customer GitHub
+sign-in, repository installation, and an internet-accessible deployment are
+separate release milestones.
+
 To enable the public repository samples on another checkout, fetch the pinned
 releases below. The Humanize sample uses Gettext's `msgfmt` to compile its
 translation fixtures. Repositories can also be set through

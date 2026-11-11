@@ -1,0 +1,22 @@
+{% extends 'hosted/base.html' %}
+{% block title %}Fix a GitHub issue{% endblock %}
+{% block content %}
+<h1>Fix a GitHub issue</h1>
+{% if intake %}
+<section class="panel" aria-labelledby="issue-title">
+  <p class="muted">Sample repository · {{ intake.repository }}</p>
+  <h2 id="issue-title"><a href="{{ intake.issue.url }}">#{{ intake.issue.number }} {{ intake.issue.title }}</a></h2>
+  <p>Generate a fix, see the sandbox test results, and open a draft for human review.</p>
+  <form method="post" action="{% url 'sample-start' %}">
+    {% csrf_token %}
+    <input type="hidden" name="sample" value="github_pagination">
+    <input type="hidden" name="request_id" value="{{ request_id }}">
+    <input type="hidden" name="issue_ticket" value="{{ ticket }}">
+    <button>Generate and test a fix</button>
+  </form>
+</section>
+{% else %}
+<p role="alert">The demo issue is unavailable. Check the GitHub App connection and confirm the enrolled issue is open and approved.</p>
+{% endif %}
+<p><a href="{% url 'sample-home' %}">Try a local sample</a></p>
+{% endblock %}

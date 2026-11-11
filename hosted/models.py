@@ -18,6 +18,7 @@ ACTIVE_STATES = (State.QUEUED, State.RUNNING, State.CANCELLING)
 
 class Sample(models.TextChoices):
     PAGINATION = 'pagination', 'Pagination · final partial page'
+    GITHUB_PAGINATION = 'github_pagination', 'GitHub issue #1 · final partial page'
     CLICK = 'click', 'Click 8.2.1 · enum default in --help'
     ATTRS = 'attrs', 'attrs 25.3.0 · constructor hook values'
     PACKAGING = 'packaging', 'packaging 26.0 · strict version comparison'
@@ -36,6 +37,8 @@ class Run(models.Model):
     lease_until = models.DateTimeField(null=True)
     message = models.CharField(max_length=200, blank=True)
     evidence = models.JSONField(default=dict)
+    github_issue = models.JSONField(default=dict)
+    draft_url = models.URLField(blank=True)
 
     class Meta:
         constraints = [models.UniqueConstraint(

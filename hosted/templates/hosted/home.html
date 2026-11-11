@@ -1,5 +1,12 @@
 {% extends 'hosted/base.html' %}
 {% block content %}
+{% if github_enabled %}
+<section class="panel" aria-labelledby="github-title">
+  <h2 id="github-title">Repair a GitHub issue</h2>
+  <p>Generate a tested fix for an issue in the connected demo repository.</p>
+  <a class="action" href="{% url 'github-issue' %}">View GitHub issue</a>
+</section>
+{% endif %}
 <h1>Fix a sample bug</h1>
 <section class="panel" aria-labelledby="sample-title">
   <form method="post" action="{% url 'sample-start' %}">

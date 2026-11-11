@@ -3,7 +3,11 @@
 {% block content %}
 <p><a href="{% url 'sample-home' %}">← Sample repair</a></p>
 <h1>{{ run.get_state_display }}</h1>
+{% if run.github_issue %}
+<p><a href="{{ run.github_issue.issue.url }}">{{ run.github_issue.repository }} #{{ run.github_issue.issue.number }} · {{ run.github_issue.issue.title }}</a></p>
+{% else %}
 <p class="muted">{{ run.get_sample_display }}</p>
+{% endif %}
 <section class="panel" data-state="{{ run.state }}" data-status="{% url 'sample-status' run.pk %}">
   {% if run.state == 'verified' %}
   <h2>Fresh verification results</h2>
@@ -20,6 +24,19 @@
   {% if run.evidence.scope_note %}<p class="muted">{{ run.evidence.scope_note }}</p>{% endif %}
   {% if run.evidence.patch %}
   <p>Base commit <code>{{ run.evidence.base_sha }}</code></p>
+  {% if run.github_issue %}
+  <p>Pagination dropped the remainder when dividing items by page size. The fix counts one more page when items remain.</p>
+  <p>Verified commit <code>{{ run.evidence.head_sha }}</code></p>
+  {% if run.draft_url %}
+  <p><a class="action" href="{{ run.draft_url }}">View draft pull request</a></p>
+  <p>Review the changes on GitHub before merging.</p>
+  {% else %}
+  {% if run.message %}<p role="alert">{{ run.message }}</p>{% endif %}
+  <form method="post" action="{% url 'github-publish' run.pk %}">
+    {% csrf_token %}<button>Open draft pull request</button>
+  </form>
+  {% endif %}
+  {% endif %}
   <details><summary>Review the patch</summary><pre style="white-space: pre-wrap">{{ run.evidence.patch }}</pre></details>
   <p>
     <a class="action" href="{% url 'sample-download' run.pk 'patch' %}">Download patch</a>
