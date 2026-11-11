@@ -39,7 +39,11 @@ CONTROL_RESULTS = {
 }
 REPORTED_TEST = "test_reported_partial_page"
 REGRESSION_TESTS = (REPORTED_TEST, "test_generated_page_counts")
-TEST_RESULT = re.compile(r"^(\S+::\S+) (PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)\b", re.M)
+# Parametrized pytest IDs can contain spaces. The progress marker ends the result line.
+TEST_RESULT = re.compile(
+    r"^(\S[^\n]*?::[^\n]+?) (PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)"
+    r"(?: \([^\n]*\))?[ \t]+\[[ \t]*\d+%\][ \t]*$", re.M,
+)
 WORKER = """\
 import importlib
 import sys
@@ -60,7 +64,7 @@ class VerificationError(Exception):
 
 
 def run_phase(name, image, staged, tests, expected, expected_errors=(), *, timeout=30, module="pagination"):
-    """Run one disposable container and require the exact expected pytest results."""
+    """Check exact pytest results or capture a passing baseline when expected is None."""
     container = f"opr-pagination-{uuid.uuid4().hex}"
     command = [
         "docker", "run", "--rm", "--name", container, "--pull", "never",
@@ -91,6 +95,11 @@ def run_phase(name, image, staged, tests, expected, expected_errors=(), *, timeo
     report = output.decode(errors="replace")
     print(report, end="", flush=True)
     observed = TEST_RESULT.findall(report)
+    if expected is None:
+        collected = re.search(r"^collecting \.\.\. collected (\d+) items?$", report, re.M)
+        if not observed or not collected or len(observed) != int(collected[1]):
+            raise VerificationError(f"{name} did not report a result for every collected test")
+        expected = dict.fromkeys((node for node, _ in observed), "PASSED")
     expected_exit = int("FAILED" in expected.values())
     if (
         result.returncode != expected_exit
@@ -99,6 +108,7 @@ def run_phase(name, image, staged, tests, expected, expected_errors=(), *, timeo
         or any(error not in report for error in expected_errors)
     ):
         raise VerificationError(f"{name} returned unexpected test results (exit {result.returncode}).\n{report[-1600:]}")
+    return expected
 
 
 def committed_file(repository, revision, path):

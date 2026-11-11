@@ -36,6 +36,23 @@ if needed. If the model is missing, follow its local download command. Use
 Run the web tests with
 `OPR_LOCAL_SECRET_KEY=local-test-only .venv/bin/python -m django test hosted --settings=hosted.settings`.
 
+## Try the external repository experiment
+
+The Humanize case uses the same local model client and Docker verifier on
+the pinned 4.15.0 release. It targets the historical
+[negative mixed-fraction bug](https://github.com/python-humanize/humanize/pull/320).
+The case adapter supplies the expected behavior and limits the model to one
+numeric expression. Run it from this repository with Docker, Ollama on port
+11435, and Gettext's `msgfmt` on your path.
+
+```sh
+git clone --depth 1 --branch 4.15.0 https://github.com/python-humanize/humanize.git ../humanize-4.15.0
+python3 fixtures/humanize-external/run_case.py ../humanize-4.15.0 --output runs/humanize-check
+```
+
+The run saves a source patch, the generated regression, and test evidence in
+the output directory. Choose a new output directory for each run.
+
 ## What we verified
 
 | Case | Measured evidence | GitHub |
