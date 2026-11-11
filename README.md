@@ -7,41 +7,34 @@ repair with a local model, verifies the exact candidate in Docker, and opens
 a draft pull request through a repository-scoped GitHub App. A human reviewer
 controls the merge on the protected default branch.
 
-## Try the local browser preview
+## Run the local browser prototype
 
-The preview reruns Docker verification of the recorded pagination draft.
-It displays the new test results beside a link to the original GitHub PR.
-Use it with a local copy of the sample repository and a running Docker daemon.
+The prototype uses Ollama to generate a patch and regression test for the
+fixed pagination sample. Docker runs the test on the original code and
+checks the generated fix. Download both files from the verified result.
 
-In a Python virtual environment, install the web dependency and prepare the
-local database and operator account. Keep the generated secret consistent
-across the web and worker processes.
-
-```sh
-python -m pip install -r requirements-web.txt
-export DJANGO_SETTINGS_MODULE=hosted.settings
-export OPR_LOCAL_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
-python -m django migrate
-python -m django createsuperuser
-```
-
-Fetch the original draft commit in the sample checkout, then start the worker
-and the loopback server. If you run them in separate terminals, set the same
-`DJANGO_SETTINGS_MODULE` and `OPR_LOCAL_SECRET_KEY` in both.
+Use a running Docker Desktop installation, Ollama with `llama3.2:latest`,
+and a sibling checkout of `museum-of-off-by-ones` containing the seed commit.
+Set `OPR_SAMPLE_REPOSITORY` if your checkout lives elsewhere. On a fresh
+checkout, prepare the virtual environment once.
 
 ```sh
-export OPR_SAMPLE_REPOSITORY=../museum-of-off-by-ones
-git -C "$OPR_SAMPLE_REPOSITORY" fetch origin refs/pull/4/head
-python -m django sample_worker &
-python -m django runserver 127.0.0.1:8000
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-web.txt
+./scripts/start-local.sh
 ```
 
-Open [the local preview](http://127.0.0.1:8000), sign in, and select
-**Verify sample repair**. The run stays in SQLite and can be reopened after
-signing out. Stop both development processes when finished. Run the web
-suite with `python -m django test hosted` using the environment above.
-The [RIG-14 implementation plan](docs/superpowers/plans/2026-11-12-hosted-sample.md)
-tracks hosted sign-in, inference, sandboxing, and fresh draft publication.
+Open [the prototype](http://127.0.0.1:8765) and sign in as `local-operator`
+with the generated password in `.local/operator-password`. Select **Generate
+and test a fix**. Recent runs and downloads are saved locally in
+`.local/sample.sqlite3`. Press Ctrl-C in the launcher terminal to stop the
+prototype, and run the same script to restart it.
+
+The launcher uses a loopback Ollama endpoint on port 11435 and starts Ollama
+if needed. If the model is missing, follow its local download command. Use
+`OPR_OLLAMA_PORT` or `OPR_WEB_PORT` to choose a different local port.
+Run the web tests with
+`OPR_LOCAL_SECRET_KEY=local-test-only .venv/bin/python -m django test hosted --settings=hosted.settings`.
 
 ## What we verified
 

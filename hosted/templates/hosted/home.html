@@ -1,14 +1,14 @@
 {% extends 'hosted/base.html' %}
 {% block content %}
-<h1>Verify a sample repair</h1>
+<h1>Fix a sample bug</h1>
 <section class="panel" aria-labelledby="sample-title">
   <h2 id="sample-title">Pagination misses the final partial page</h2>
   <p>A list of 21 items with 10 items per page needs three pages. The original code returned two.</p>
-  <p class="muted">Run fresh checks on the sample repository’s recorded fix. You can leave this page and return to the result.</p>
+  <p class="muted">Generate a patch and regression test on this laptop. You can leave this page and return to the result.</p>
   <form method="post" action="{% url 'sample-start' %}">
     {% csrf_token %}
     <input type="hidden" name="request_id" value="{{ request_id }}">
-    <button>Verify sample repair</button>
+    <button>Generate and test a fix</button>
   </form>
 </section>
 {% if runs %}

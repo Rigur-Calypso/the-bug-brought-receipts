@@ -11,4 +11,5 @@ urlpatterns = [
     path('runs/<uuid:run_id>/', views.detail, name='sample-run'),
     path('runs/<uuid:run_id>/status/', views.status, name='sample-status'),
     path('runs/<uuid:run_id>/cancel/', views.cancel, name='sample-cancel'),
+    path('runs/<uuid:run_id>/download/<str:artifact>/', views.download, name='sample-download'),
 ]

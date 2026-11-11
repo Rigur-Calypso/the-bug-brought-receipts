@@ -6,9 +6,9 @@ from django.db import models
 
 class State(models.TextChoices):
     QUEUED = 'queued', 'Queued'
-    RUNNING = 'running', 'Verifying the sample'
+    RUNNING = 'running', 'Generating and testing the fix'
     CANCELLING = 'cancelling', 'Cancelling'
-    VERIFIED = 'verified', 'Sample verified'
+    VERIFIED = 'verified', 'Repair verified'
     FAILED = 'failed', 'Verification stopped'
     CANCELLED = 'cancelled', 'Cancelled'
 

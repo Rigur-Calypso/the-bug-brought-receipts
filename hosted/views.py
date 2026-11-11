@@ -3,7 +3,7 @@ from uuid import UUID, uuid4
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import user_passes_test
 from django.db import transaction
-from django.http import HttpResponseBadRequest, JsonResponse
+from django.http import Http404, HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
@@ -58,6 +58,20 @@ def detail(request, run_id):
 def status(request, run_id):
     run = get_object_or_404(Run, pk=run_id, owner=request.user)
     return JsonResponse({'state': run.state})
+
+
+@never_cache
+@operator_required
+@require_GET
+def download(request, run_id, artifact):
+    run = get_object_or_404(Run, pk=run_id, owner=request.user, state=State.VERIFIED)
+    filename = {'patch': 'pagination.patch', 'regression': 'test_pagination_regression.py'}.get(artifact)
+    if filename is None or not run.evidence.get(artifact):
+        raise Http404
+    return HttpResponse(run.evidence[artifact], content_type='text/plain; charset=utf-8', headers={
+        'Content-Disposition': f'attachment; filename="{filename}"',
+        'X-Content-Type-Options': 'nosniff',
+    })
 
 
 @never_cache

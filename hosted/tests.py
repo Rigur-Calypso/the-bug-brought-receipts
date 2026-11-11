@@ -82,3 +82,17 @@ class SampleFlowTests(TestCase):
         run_next(verify)
         self.assertEqual(self.client.get(url + 'status/').json()['state'], 'failed')
         self.assertNotContains(self.client.get(url), 'Original draft PR')
+
+    def test_verified_artifact_download_requires_the_run_owner(self):
+        from hosted.worker import run_next
+
+        url = self.start().url
+        download = url + 'download/patch/'
+        self.assertEqual(self.client.get(download).status_code, 404)
+        run_next(lambda checkpoint: {'patch': '+return page_count\n'})
+        response = self.client.get(download)
+        self.assertEqual(response.content, b'+return page_count\n')
+        self.assertEqual(response.headers['Content-Disposition'], 'attachment; filename="pagination.patch"')
+        other = get_user_model().objects.create_user('other', is_staff=True)
+        self.client.force_login(other)
+        self.assertEqual(self.client.get(download).status_code, 404)

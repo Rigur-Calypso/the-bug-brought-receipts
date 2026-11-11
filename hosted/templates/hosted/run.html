@@ -7,15 +7,28 @@
 <section class="panel" data-state="{{ run.state }}" data-status="{% url 'sample-status' run.pk %}">
   {% if run.state == 'verified' %}
   <h2>Fresh verification results</h2>
+  {% if run.evidence.patch %}
+  <p>The new regression reproduced the missing page on the original commit and passed with the generated patch.</p>
+  {% else %}
   <p>The regression reproduced the missing page on the original commit and passed on the recorded fix.</p>
+  {% endif %}
   <ul>
     <li>{{ run.evidence.passed.generated }} regression tests passed</li>
     <li>{{ run.evidence.passed.original_suite }} original tests passed</li>
     <li>{{ run.evidence.passed.independent }} independent checks passed</li>
   </ul>
+  {% if run.evidence.patch %}
+  <p>Base commit <code>{{ run.evidence.base_sha }}</code></p>
+  <details><summary>Review the patch</summary><pre style="white-space: pre-wrap">{{ run.evidence.patch }}</pre></details>
+  <p>
+    <a class="action" href="{% url 'sample-download' run.pk 'patch' %}">Download patch</a>
+    <a class="action secondary" href="{% url 'sample-download' run.pk 'regression' %}">Download regression test</a>
+  </p>
+  {% else %}
   {% if run.evidence.head_sha %}<p>Verified commit <code>{{ run.evidence.head_sha }}</code></p>{% endif %}
   <a class="action" href="https://github.com/Rigur-Calypso/museum-of-off-by-ones/pull/4">Original draft PR</a>
   <p class="muted">Published during the hackathon. Access requires permission to the sample repository.</p>
+  {% endif %}
   {% elif run.message %}
   <p>{{ run.message }}</p>
   {% elif run.active %}
@@ -23,7 +36,7 @@
   {% endif %}
   {% if run.state == 'queued' or run.state == 'running' %}
   <form method="post" action="{% url 'sample-cancel' run.pk %}">
-    {% csrf_token %}<button class="secondary">Cancel verification</button>
+    {% csrf_token %}<button class="secondary">Cancel run</button>
   </form>
   {% endif %}
 </section>

@@ -145,7 +145,7 @@ def verify_committed_repair(repository, base, head, regression_sha256, *, image=
     }
 
 
-def verify_generated_repair(image, buggy, stage, output, intake, port, deadline, baseline, controls):
+def verify_generated_repair(image, buggy, stage, output, intake, port, deadline, baseline, controls, *, checkpoint=None):
     regression_path = buggy / "generated_regression.py"
     reported = "generated_regression.py::test_reported_partial_page"
     generated = {reported: "PASSED", "generated_regression.py::test_generated_page_counts": "PASSED"}
@@ -162,7 +162,14 @@ def verify_generated_repair(image, buggy, stage, output, intake, port, deadline,
     }
 
     def verify(name, directory, tests, expected, errors=()):
+        if checkpoint is not None:
+            checkpoint()
         run_phase(name, image, directory, tests, expected, errors, timeout=time_left(deadline, 30))
+
+    def generate(prompt, schema):
+        if checkpoint is not None:
+            checkpoint()
+        return propose(prompt, schema, port, deadline, timeout=40 if checkpoint is not None else 75)
 
     try:
         feedback = ""
@@ -170,12 +177,12 @@ def verify_generated_repair(image, buggy, stage, output, intake, port, deadline,
             event = {"phase": "regression", "attempt": attempt}
             evidence["attempts"].append(event)
             try:
-                proposal = propose(
+                proposal = generate(
                     "Propose exactly four [item_count, page_size, expected_pages] integer triples. "
                     "Use the known issue example [21, 10, 3] and the known zero-item example [0, 10, 0]. "
                     "For the other two cases, choose a full page and a partial page. The second number must be positive. "
                     "Return only the requested JSON.\n" + context + feedback,
-                    {"cases": CASE_SCHEMA}, port, deadline,
+                    {"cases": CASE_SCHEMA},
                 )
                 event["proposal"] = proposal
                 regression = render_regression(proposal["cases"])
@@ -197,13 +204,17 @@ def verify_generated_repair(image, buggy, stage, output, intake, port, deadline,
         for attempt in range(1, 4):
             event = {"phase": "patch", "attempt": attempt}
             evidence["attempts"].append(event)
+            proposal = {}
             try:
-                proposal = propose(
+                proposal = generate(
                     "Propose only a replacement for the final return expression. "
                     "Use integer arithmetic with +, -, *, //, %, or != and the two parameters. "
-                    "Keep existing validation and zero behavior. Provide a short diagnosis.\n"
+                    "Keep the number of whole pages from floor division. "
+                    "Add one only when the remainder is nonzero, using the numeric value of a comparison. "
+                    "Examples: (0, 10) -> 0, (20, 10) -> 2, (21, 10) -> 3. "
+                    "Provide a short diagnosis.\n"
                     + context + "\nFrozen regression:\n" + regression + feedback,
-                    {"expression": {"type": "string"}, "diagnosis": {"type": "string"}}, port, deadline,
+                    {"expression": {"type": "string"}, "diagnosis": {"type": "string"}},
                 )
                 event["proposal"] = proposal
                 patched = patch_source(source, proposal["expression"])
@@ -217,7 +228,8 @@ def verify_generated_repair(image, buggy, stage, output, intake, port, deadline,
                 verify("Independent behavior checks", candidate, ["expected_behavior.py"], controls)
             except (ValueError, VerificationError) as error:
                 event["rejected"] = str(error)
-                feedback = f"\nPrevious proposal rejected. {error}"
+                prior = json.dumps(proposal.get("expression"))[:250]
+                feedback = f"\nRejected expression: {prior}. Propose a different expression. {error}"
             else:
                 event["verified"] = True
                 break
