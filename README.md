@@ -36,7 +36,7 @@ if needed. If the model is missing, follow its local download command. Use
 Run the web tests with
 `OPR_LOCAL_SECRET_KEY=local-test-only .venv/bin/python -m django test hosted --settings=hosted.settings`.
 
-## Try the external repository experiment
+## Try the external repository experiments
 
 The Humanize case uses the same local model client and Docker verifier on
 the pinned 4.15.0 release. It targets the historical
@@ -52,6 +52,25 @@ python3 fixtures/humanize-external/run_case.py ../humanize-4.15.0 --output runs/
 
 The run saves a source patch, the generated regression, and test evidence in
 the output directory. Choose a new output directory for each run.
+
+Run the Humanize tests against three deliberately wrong formatting repairs
+with the control script. The added `-1.75` check catches a patch that
+hardcodes negative numerators to one.
+
+```sh
+python3 fixtures/humanize-external/check_controls.py ../humanize-4.15.0 runs/humanize-check --output runs/humanize-controls
+```
+
+The iterator cases use pinned Boltons 26.2.0 and more-itertools 10.8.0
+checkouts. Each runs the reported regression and selected upstream tests.
+The Boltons model chooses between two allowed identity comparisons.
+
+```sh
+git clone --depth 1 --branch 26.2.0 https://github.com/mahmoud/boltons.git ../boltons-26.2.0
+git clone --depth 1 --branch v10.8.0 https://github.com/more-itertools/more-itertools.git ../more-itertools-10.8.0
+python3 fixtures/iterator-external/run_cases.py boltons ../boltons-26.2.0 --output runs/boltons-check
+python3 fixtures/iterator-external/run_cases.py more_itertools ../more-itertools-10.8.0 --output runs/more-itertools-check
+```
 
 ## What we verified
 
