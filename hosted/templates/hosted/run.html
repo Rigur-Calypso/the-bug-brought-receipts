@@ -25,6 +25,7 @@
     <a class="action secondary" href="{% url 'sample-download' run.pk 'regression' %}">Download regression test</a>
   </p>
   {% else %}
+  {% comment %}Earlier preview runs contain replay evidence and the historical draft link.{% endcomment %}
   {% if run.evidence.head_sha %}<p>Verified commit <code>{{ run.evidence.head_sha }}</code></p>{% endif %}
   <a class="action" href="https://github.com/Rigur-Calypso/museum-of-off-by-ones/pull/4">Original draft PR</a>
   <p class="muted">Published during the hackathon. Access requires permission to the sample repository.</p>

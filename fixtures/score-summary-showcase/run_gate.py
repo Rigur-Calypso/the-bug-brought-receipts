@@ -16,7 +16,7 @@ from pathlib import Path
 FIXTURE = Path(__file__).resolve().parent
 sys.path.insert(0, str(FIXTURE.with_name("pagination-smoke")))
 from pagination_generation import MODEL, propose, time_left
-from run_in_docker import BASELINE_IDS, VerificationError, build_image, run_phase, stage_files
+from run_in_docker import BASELINE_RESULTS, VerificationError, build_image, committed_file, run_phase, stage_files
 
 
 REGRESSION = "generated_regression.py"
@@ -54,11 +54,12 @@ def render_regression(names):
 
 
 def sources(source):
+    """Build positive and negative controls with their expected failing tests."""
     prefix, rest = source.split("    values = list(scores)\n", 1)
-    original = "    values = list(scores)\n" + rest
+    materialize = "    values = list(scores)\n"
+    original = materialize + rest
     fallback = '        return "No scores"\n'
-    guard = "    if not values:\n" + fallback
-    ready = original.replace(rest, guard + rest)
+    ready = materialize + "    if not values:\n" + fallback + rest
     correct = {
         "single_pass_total": prefix + (
             "    total = count = 0\n"
@@ -89,6 +90,7 @@ def sources(source):
 
 
 def run_gate(output, port, *, replay=None):
+    """Check one regression against the original code, candidate, and control implementations."""
     output.mkdir(parents=True)
     start = time.monotonic()
     deadline = start + 600
@@ -144,6 +146,7 @@ def run_gate(output, port, *, replay=None):
             bad = {name: stage_source(name, data[0]) for name, data in wrong.items()}
             for name, directory in good.items():
                 check(f"Calibrate correct {name}", directory, controls, CONTROL_NAMES)
+            # These controls must fail for the expected behavior before they can evaluate a test.
             for name, directory in bad.items():
                 marker = EMPTY_ERROR if name == "list_only" else "AssertionError"
                 check(f"Calibrate wrong {name}", directory, controls, CONTROL_NAMES, wrong[name][1], (marker,))
@@ -238,9 +241,7 @@ def run_gate(output, port, *, replay=None):
 
 
 def verify_committed_showcase(repository, base, head, generation, output):
-    def committed(revision, path):
-        return subprocess.check_output(["git", "-C", repository, "show", f"{revision}:{path}"], timeout=15)
-
+    """Recheck the actual proposed commit without asking the model for new answers."""
     exact_files = {
         "base_source": (base, "score_summary.py", "base_source_sha256"),
         "candidate_source": (head, "score_summary.py", "candidate_source_sha256"),
@@ -248,19 +249,19 @@ def verify_committed_showcase(repository, base, head, generation, output):
     }
     replay = dict(generation)
     for name, (revision, path, key) in exact_files.items():
-        content = committed(revision, path)
+        content = committed_file(repository, revision, path)
         if hashlib.sha256(content).hexdigest() != generation[key]:
             raise VerificationError(f"Committed {name} differs from the verified showcase")
         replay[name] = content.decode()
 
     baseline = "tests/test_score_summary.py"
+    expected_baseline = (FIXTURE / "baseline_suite.py").read_bytes()
     for revision in (base, head):
-        if committed(revision, baseline) != (FIXTURE / "baseline_suite.py").read_bytes():
+        if committed_file(repository, revision, baseline) != expected_baseline:
             raise VerificationError("The committed showcase baseline differs from the verified fixture")
     gate = run_gate(output / f"commit-{head[:12]}", port=None, replay=replay)
 
-    suite = expected(baseline, BASELINE_NAMES)
-    suite.update({f"tests/test_pagination.py::{name}": "PASSED" for name in BASELINE_IDS})
+    suite = BASELINE_RESULTS | expected(baseline, BASELINE_NAMES)
     prior_tests = subprocess.check_output(
         ["git", "-C", repository, "ls-tree", "-r", "--name-only", base, "--", "tests"], text=True, timeout=15,
     ).splitlines()

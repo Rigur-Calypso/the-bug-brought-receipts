@@ -11,10 +11,10 @@ from django.views.decorators.http import require_GET, require_POST
 from .models import ACTIVE_STATES, Run, RunRequest, State
 
 
-operator_required = user_passes_test(lambda user: user.is_active and user.is_staff)
+def operator_required(view):
+    return never_cache(user_passes_test(lambda user: user.is_active and user.is_staff)(view))
 
 
-@never_cache
 @operator_required
 @require_GET
 def home(request):
@@ -23,7 +23,6 @@ def home(request):
     })
 
 
-@never_cache
 @operator_required
 @require_POST
 def start(request):
@@ -44,7 +43,6 @@ def start(request):
     return redirect('sample-run', run_id=run.pk)
 
 
-@never_cache
 @operator_required
 @require_GET
 def detail(request, run_id):
@@ -52,7 +50,6 @@ def detail(request, run_id):
     return render(request, 'hosted/run.html', {'run': run})
 
 
-@never_cache
 @operator_required
 @require_GET
 def status(request, run_id):
@@ -60,7 +57,6 @@ def status(request, run_id):
     return JsonResponse({'state': run.state})
 
 
-@never_cache
 @operator_required
 @require_GET
 def download(request, run_id, artifact):
@@ -74,7 +70,6 @@ def download(request, run_id, artifact):
     })
 
 
-@never_cache
 @operator_required
 @require_POST
 def cancel(request, run_id):

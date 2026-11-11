@@ -7,6 +7,7 @@ from django.utils import timezone
 from .models import Run, State
 
 
+# A checkpoint renews the lease before each bounded model or Docker operation.
 LEASE = timedelta(seconds=55)
 logger = logging.getLogger(__name__)
 
@@ -19,14 +20,19 @@ class SampleFailure(Exception):
     """A short user-facing failure with no raw subprocess output."""
 
 
+def fail_expired_runs(runs, now):
+    runs.filter(state=State.RUNNING, lease_until__lte=now).update(
+        state=State.FAILED, lease_until=None, message='The worker stopped responding. Start a new verification.',
+    )
+
+
 def claim_next():
     with transaction.atomic():
         now = timezone.now()
-        expired = Run.objects.filter(lease_until__lte=now)
-        expired.filter(state=State.CANCELLING).update(state=State.CANCELLED, lease_until=None)
-        expired.filter(state=State.RUNNING).update(
-            state=State.FAILED, lease_until=None, message='The worker stopped responding. Start a new verification.',
+        Run.objects.filter(state=State.CANCELLING, lease_until__lte=now).update(
+            state=State.CANCELLED, lease_until=None,
         )
+        fail_expired_runs(Run.objects.all(), now)
         run = Run.objects.select_for_update().filter(state=State.QUEUED).order_by('created_at', 'pk').first()
         if run:
             run.state = State.RUNNING
@@ -36,6 +42,7 @@ def claim_next():
 
 
 def run_next(verify):
+    """Claim one run, execute outside the transaction, and save only while it owns the lease."""
     run = claim_next()
     if run is None:
         return False
@@ -61,11 +68,10 @@ def run_next(verify):
     finally:
         with transaction.atomic():
             now = timezone.now()
+            # Cancelled or expired attempts cannot save a result after losing the lease.
             current.filter(state=State.RUNNING, lease_until__gt=now).update(
                 state=state, message=message, evidence=evidence, lease_until=None,
             )
             current.filter(state=State.CANCELLING).update(state=State.CANCELLED, lease_until=None)
-            current.filter(state=State.RUNNING, lease_until__lte=now).update(
-                state=State.FAILED, lease_until=None, message='The worker stopped responding. Start a new verification.',
-            )
+            fail_expired_runs(current, now)
     return True

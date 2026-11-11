@@ -36,6 +36,8 @@ class Run(models.Model):
 
 
 class RunRequest(models.Model):
+    """Keep retries tied to the same run after it finishes or is cancelled."""
+
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     key = models.UUIDField()
     run = models.ForeignKey(Run, on_delete=models.CASCADE)

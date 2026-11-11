@@ -144,6 +144,10 @@ repair branches, so use the recorded PR links when presenting this run.
 
 ## Source map
 
+- `scripts/start-local.sh` starts the loopback web server and the repair worker.
+- `hosted/views.py` handles sign-in protection, run requests, and downloads.
+- `hosted/worker.py` claims runs and saves results. The
+  `sample_worker` command stages the fixture and calls the shared verifier.
 - `issue_intake.py` reads the two enrolled GitHub issues and records the exact base.
 - `fixtures/pagination-smoke/` contains the Docker worker, the pagination
   generation flow, and the shared publisher.

@@ -30,6 +30,7 @@ def github_get(path):
 
 
 def read_issue(issue_url, *, seed=False):
+    """Resolve one enrolled issue and pin the source revision and issue text."""
     requested = issue_url.rstrip("/").casefold()
     for case_path in CASE_PATHS:
         case = json.loads(case_path.read_text())
@@ -52,6 +53,7 @@ def read_issue(issue_url, *, seed=False):
         raise IntakeError("The approved URL must refer to the original open GitHub issue")
 
     labels = sorted(label["name"] for label in issue["labels"])
+    # Seed runs may reproduce a fixture before the maintainer approves publication.
     if not seed and REQUIRED_LABEL not in {label.casefold() for label in labels}:
         raise IntakeError(f"The approved issue needs the {REQUIRED_LABEL} label")
 

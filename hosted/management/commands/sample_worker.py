@@ -1,7 +1,6 @@
 import hashlib
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -29,10 +28,11 @@ class Command(BaseCommand):
             raise CommandError('Set OPR_SAMPLE_REPOSITORY to the local sample repository.')
         repository = Path(configured_repository).resolve()
         fixture = settings.BASE_DIR / 'fixtures' / 'pagination-smoke'
+        # The fixture scripts also run directly from this directory as CLIs.
         sys.path.insert(0, str(fixture))
         from run_in_docker import (
-            BASELINE_IDS, CONTROL_IDS, VerificationError, build_image, run_phase,
-            stage_files, verify_generated_repair,
+            BASELINE_RESULTS, VerificationError, build_image, run_phase,
+            stage_pagination_seed, verify_generated_repair,
         )
 
         case = json.loads((fixture / 'case.json').read_text())
@@ -56,26 +56,19 @@ class Command(BaseCommand):
         except (OSError, subprocess.SubprocessError) as error:
             raise CommandError('Start Docker and ensure the local sample checkout contains its seed commit.') from error
 
-        baseline = {f'{case["baseline"]}::{node}': 'PASSED' for node in BASELINE_IDS}
-        controls = {f'expected_behavior.py::{node}': 'PASSED' for node in CONTROL_IDS}
-
         def verify(checkpoint):
             deadline = time.monotonic() + 600
             try:
                 with tempfile.TemporaryDirectory(prefix='opr-local-repair-') as directory:
                     stage = Path(directory).resolve()
-                    buggy = stage / 'buggy'
-                    output = stage / 'output'
+                    buggy, output = stage / 'buggy', stage / 'output'
                     output.mkdir()
-                    stage_files(repository, base, buggy, (case['source'], case['baseline']), checkpoint=checkpoint)
-                    shutil.copyfile(fixture / 'expected_behavior.py', buggy / 'expected_behavior.py')
+                    stage_pagination_seed(repository, base, buggy, checkpoint=checkpoint)
                     checkpoint()
-                    run_phase('Baseline on original commit', image, buggy, ['tests'], baseline)
-                    verify_generated_repair(
-                        image, buggy, stage, output, intake, port, deadline, baseline, controls,
-                        checkpoint=checkpoint,
+                    run_phase('Baseline on original commit', image, buggy, ['tests'], BASELINE_RESULTS)
+                    evidence = verify_generated_repair(
+                        image, buggy, output, intake, port, deadline, checkpoint=checkpoint,
                     )
-                    evidence = json.loads((output / 'evidence.json').read_text())
                     return {
                         'base_sha': base,
                         'passed': evidence['passed'],

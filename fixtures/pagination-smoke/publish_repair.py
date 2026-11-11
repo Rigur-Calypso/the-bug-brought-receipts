@@ -97,13 +97,10 @@ def prepare_commit(repository, run, base, case):
         checkout = Path(directory) / "checkout"
         git(repository, "worktree", "add", "--detach", str(checkout), base)
         try:
-            patch = str(run / "candidate.patch")
-            scope = f"--include={case['source']}"
-            git(checkout, "apply", "--check", scope, patch)
-            git(checkout, "apply", scope, patch)
             regression = checkout / case["regression"]
             if (checkout / case["source"]).is_symlink() or regression.exists() or regression.is_symlink():
                 raise VerificationError("The source and new regression must be regular files")
+            git(checkout, "apply", f"--include={case['source']}", str(run / "candidate.patch"))
             shutil.copyfile(run / "generated_regression.py", regression)
             git(checkout, "add", "--", case["source"], case["regression"])
             git(checkout, "diff", "--cached", "--check")
@@ -168,6 +165,7 @@ def publish(args, case, issue_url):
         if snapshot["body"].strip() != contract.read_text().strip():
             raise VerificationError("The live issue differs from the verified showcase contract")
     else:
+        # The original smoke run captured its issue before the publication label was added.
         prior_snapshot = dict(snapshot, labels=[name for name in snapshot["labels"] if name.casefold() != "opr:fix"])
         prior_digest = hashlib.sha256(json.dumps(prior_snapshot, sort_keys=True).encode()).hexdigest()
         if generation["base_sha"] != case["seed_sha"] or generation["issue_snapshot_sha256"] not in {prior_digest, current["issue_snapshot_sha256"]}:
@@ -202,6 +200,7 @@ def publish(args, case, issue_url):
             "model": generation["model"],
             **checks,
         }
+        # Persist the exact verified commit before the first remote write so retries can reuse it.
         temporary_plan = plan.with_suffix(".tmp")
         temporary_plan.write_text(json.dumps(record, indent=2) + "\n")
         temporary_plan.replace(plan)
@@ -225,6 +224,7 @@ def publish(args, case, issue_url):
         branch_ref = f"refs/heads/{branch}"
         remote = github(f"{repo_api}/git/ref/heads/{branch}", token, missing=True)
         if remote is None:
+            # An empty expected ref makes this a create-only push if another publisher races us.
             env = dict(os.environ, GH_TOKEN=token, GIT_TERMINAL_PROMPT="0")
             subprocess.run(
                 [

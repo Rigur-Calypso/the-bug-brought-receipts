@@ -24,6 +24,7 @@ TEMPLATES = [{
 DATABASES = {'default': {
     'ENGINE': 'django.db.backends.sqlite3',
     'NAME': os.environ.get('OPR_SAMPLE_DB', BASE_DIR / 'sample.sqlite3'),
+    # Reserve the SQLite write lock before queue transactions read their current state.
     'OPTIONS': {'transaction_mode': 'IMMEDIATE'},
 }}
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

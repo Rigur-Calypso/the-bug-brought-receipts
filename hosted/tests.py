@@ -5,6 +5,9 @@ from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.utils import timezone
 
+from .models import Run
+from .worker import run_next
+
 
 class SampleFlowTests(TestCase):
     def setUp(self):
@@ -38,8 +41,6 @@ class SampleFlowTests(TestCase):
         self.assertEqual(self.client.post(url + 'cancel/').status_code, 404)
 
     def test_worker_records_new_checks_and_labels_original_draft(self):
-        from hosted.worker import run_next
-
         url = self.start().url
         self.assertEqual(self.client.get(url + 'status/').json()['state'], 'queued')
 
@@ -55,8 +56,6 @@ class SampleFlowTests(TestCase):
         self.assertFalse(run_next(verify))
 
     def test_cancel_during_verification_prevents_success(self):
-        from hosted.worker import run_next
-
         url = self.start().url
 
         def verify(checkpoint):
@@ -69,9 +68,6 @@ class SampleFlowTests(TestCase):
         self.assertNotContains(self.client.get(url), 'Original draft PR')
 
     def test_expired_worker_lease_cannot_be_overwritten(self):
-        from hosted.models import Run
-        from hosted.worker import run_next
-
         url = self.start().url
 
         def verify(checkpoint):
@@ -84,8 +80,6 @@ class SampleFlowTests(TestCase):
         self.assertNotContains(self.client.get(url), 'Original draft PR')
 
     def test_verified_artifact_download_requires_the_run_owner(self):
-        from hosted.worker import run_next
-
         url = self.start().url
         download = url + 'download/patch/'
         self.assertEqual(self.client.get(download).status_code, 404)

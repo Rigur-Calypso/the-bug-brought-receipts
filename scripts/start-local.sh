@@ -21,6 +21,7 @@ web_port="${OPR_WEB_PORT:-8765}"
 export OLLAMA_HOST="127.0.0.1:$OPR_OLLAMA_PORT"
 model_pid='' worker_pid='' web_pid=''
 
+# Stop only processes created by this launcher, including a local model server if needed.
 cleanup() {
   for pid in "$web_pid" "$worker_pid" "$model_pid"; do
     if [[ -n "$pid" ]]; then kill "$pid" 2>/dev/null || true; fi
