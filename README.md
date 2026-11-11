@@ -9,8 +9,8 @@ controls the merge on the protected default branch.
 
 ## Run the local browser prototype
 
-The prototype uses Ollama to generate a patch and regression test for the
-pagination or Click sample. Docker runs the test on the original code and
+The prototype uses Ollama to generate a patch and regression test for one of
+eight enrolled samples. Docker runs the test on the original code and
 checks the generated fix. Download both files from the verified result.
 
 Use a running Docker Desktop installation, Ollama with `llama3.2:latest`,
@@ -30,12 +30,24 @@ and select **Generate and test a fix**. Recent runs and downloads are saved loca
 `.local/sample.sqlite3`. Press Ctrl-C in the launcher terminal to stop the
 prototype, and run the same script to restart it.
 
-To enable the Click sample on another checkout, fetch its pinned release once.
-Set `OPR_CLICK_REPOSITORY` if you keep it in a different location.
+To enable the public repository samples on another checkout, fetch the pinned
+releases below. The Humanize sample uses Gettext's `msgfmt` to compile its
+translation fixtures. Repositories can also be set through
+`OPR_<SAMPLE>_REPOSITORY`, such as `OPR_CLICK_REPOSITORY`.
 
 ```sh
 git clone --depth 1 --branch 8.2.1 https://github.com/pallets/click.git .local/click-8.2.1
+git clone --depth 1 --branch 25.3.0 https://github.com/python-attrs/attrs.git .local/attrs-25.3.0
+git clone --depth 1 --branch 26.0 https://github.com/pypa/packaging.git .local/packaging-26.0
+git clone --depth 1 --branch 2.7.5 https://github.com/dateutil/dateutil.git .local/dateutil-2.7.5
+git clone --depth 1 --branch 4.15.0 https://github.com/python-humanize/humanize.git .local/humanize-4.15.0
+git clone --depth 1 --branch 26.2.0 https://github.com/mahmoud/boltons.git .local/boltons-26.2.0
+git clone --depth 1 --branch v10.8.0 https://github.com/more-itertools/more-itertools.git .local/more-itertools-10.8.0
 ```
+
+The browser runs report the selected upstream checks for each sample. The
+packaging and dateutil patches update exact historical test expectations
+to match their verified fixed releases.
 
 The launcher uses a loopback Ollama endpoint on port 11435 and starts Ollama
 if needed. If the model is missing, follow its local download command. Use

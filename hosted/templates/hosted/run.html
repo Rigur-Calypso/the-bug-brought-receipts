@@ -15,8 +15,9 @@
   <ul>
     <li>{{ run.evidence.passed.generated }} regression tests passed</li>
     <li>{{ run.evidence.passed.original_suite }} original tests passed</li>
-    <li>{{ run.evidence.passed.independent }} independent checks passed</li>
+    {% if run.evidence.passed.independent %}<li>{{ run.evidence.passed.independent }} independent checks passed</li>{% endif %}
   </ul>
+  {% if run.evidence.scope_note %}<p class="muted">{{ run.evidence.scope_note }}</p>{% endif %}
   {% if run.evidence.patch %}
   <p>Base commit <code>{{ run.evidence.base_sha }}</code></p>
   <details><summary>Review the patch</summary><pre style="white-space: pre-wrap">{{ run.evidence.patch }}</pre></details>

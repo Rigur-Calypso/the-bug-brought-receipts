@@ -72,13 +72,13 @@ CASES = {
 }
 
 
-def stage_checkout(repository, case, directory):
+def stage_checkout(repository, case, directory, checkpoint=None):
     package = case["path"].split("/")[0]
     paths = subprocess.check_output(
         ["git", "-C", repository, "ls-tree", "-r", "--name-only", case["base"], "--", package, "tests"],
         text=True, timeout=15,
     ).splitlines()
-    stage_files(repository, case["base"], directory, paths)
+    stage_files(repository, case["base"], directory, paths, checkpoint=checkpoint)
     (directory / "iterator_probe.py").write_text(
         f'import {package}\nfrom pathlib import Path\n'
         f'assert Path({package}.__file__).resolve().parent == Path("/work/{package}")\n'
@@ -105,15 +105,22 @@ def validated_condition(raw, parameter):
     return ast.unparse(expression)
 
 
-def run_case(name, repository, output, port, image):
+def run_case(name, repository, output, port, image, *, checkpoint=None):
     case = CASES[name]
     output.mkdir(parents=True)
     with tempfile.TemporaryDirectory(prefix=f"opr-{name}-") as temp:
         stage = Path(temp).resolve()
-        stage_checkout(repository, case, stage)
+        stage_checkout(repository, case, stage, checkpoint)
 
         def check(label, paths, expected, markers=()):
+            if checkpoint:
+                checkpoint()
             return run_phase(f"{name}: {label}", image, stage, paths, expected, markers, module="iterator_probe")
+
+        def ask(prompt, schema, system):
+            if checkpoint:
+                checkpoint()
+            return propose(prompt, schema, port, deadline, system=system, timeout=40)
 
         source_path = stage / case["path"]
         source = source_path.read_text()
@@ -125,11 +132,11 @@ def run_case(name, repository, output, port, image):
         baseline = check("upstream baseline", case["baseline"], None)
         deadline = time.monotonic() + 180
         probes = case["probes"]
-        selection = propose(
+        selection = ask(
             case["description"] + "\nSelect all four probe IDs, including compatibility checks: "
             + ", ".join(probes),
             {"probes": {"type": "array", "items": {"type": "string", "enum": list(probes)}}},
-            port, deadline, system="Select bounded tests for a Python iterator bug.",
+            system="Select bounded tests for a Python iterator bug.",
         )["probes"]
         if not isinstance(selection, list) or not all(isinstance(probe, str) for probe in selection):
             raise VerificationError("Expected a list of test IDs")
@@ -160,9 +167,9 @@ def run_case(name, repository, output, port, image):
             raise VerificationError("The expected edit location is missing or ambiguous")
         for _ in range(3):
             try:
-                raw = propose(
+                raw = ask(
                     case["description"] + "\n" + prompt + "\n" + context + feedback,
-                    {"condition": condition_schema}, port, deadline,
+                    {"condition": condition_schema},
                     system="Propose one bounded condition for a Python correctness fix.",
                 )["condition"]
                 condition = validated_condition(raw, case["parameter"])
