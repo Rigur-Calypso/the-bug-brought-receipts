@@ -20,7 +20,10 @@ APPROVED_ISSUE = 'cdf35eab1bede9b422be81a566d1ce1d76b8237aa0f0621ad65188b85d3e39
 
 # The same publisher also runs as a standalone fixture CLI.
 sys.path.insert(0, str(FIXTURE))
-from publish_repair import VerificationError, git, github, prepare_commit, publish_verified, scoped_installation
+from publish_repair import (
+    VerificationError, check_candidate_scope, git, github, prepare_commit, publication_lock,
+    publish_verified, scoped_installation, verify_pagination_artifacts,
+)
 from run_in_docker import verify_committed_repair
 
 GITHUB_ERRORS = (IntakeError, VerificationError, OSError, URLError, subprocess.SubprocessError, ValueError, KeyError)
@@ -60,10 +63,10 @@ def verify_candidate(run, repository, output, image, generation, checkpoint):
     case = browser_case(run)
     base = run.github_issue['base_sha']
     checkpoint()
-    head = prepare_commit(repository, output, base, case)
+    head = prepare_commit(repository, output, base, case, checkpoint=checkpoint)
     checkpoint()
-    if set(git(repository, 'diff', '--name-only', base, head).splitlines()) != {case['source'], case['regression']}:
-        raise VerificationError('The candidate changed files outside the enrolled repair.')
+    check_candidate_scope(repository, base, head, case)
+    verify_pagination_artifacts(repository, base, head, case, generation)
     checks = verify_committed_repair(
         repository, base, head, generation['regression_sha256'], image=image, checkpoint=checkpoint,
     )
@@ -77,4 +80,6 @@ def verify_candidate(run, repository, output, image, generation, checkpoint):
 
 
 def open_draft(run):
-    return publish_verified(app_config(), browser_case(run), run.evidence, read_current)
+    args = app_config()
+    with publication_lock(args.repository, CASE['issue_number']):
+        return publish_verified(args, browser_case(run), run.evidence, read_current)

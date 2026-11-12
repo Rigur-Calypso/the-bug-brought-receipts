@@ -4,8 +4,11 @@ import argparse
 import difflib
 import hashlib
 import json
+import os
 import re
+import selectors
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -37,6 +40,7 @@ BASELINE_RESULTS = {f"{BASELINE_FILE}::{name}": "PASSED" for name in BASELINE_ID
 CONTROL_RESULTS = {
     f"{CONTROL_FILE}::test_counts_partial_pages[21-10-3]": "PASSED",
     f"{CONTROL_FILE}::test_counts_partial_pages[1-10-1]": "PASSED",
+    f"{CONTROL_FILE}::test_counts_pages_across_sizes": "PASSED",
 }
 REPORTED_TEST = "test_reported_partial_page"
 REGRESSION_TESTS = (REPORTED_TEST, "test_generated_page_counts")
@@ -58,14 +62,66 @@ if Path(module.__file__).resolve() != Path("/work") / f"{module_name}.py":
     raise SystemExit("Imported the target module from outside the staged source")
 raise SystemExit(pytest.main(sys.argv[1:]))
 """
+OUTPUT_LIMIT = 65_536
 
 
 class VerificationError(Exception):
     """The Docker run disagreed with the expected test outcomes."""
 
 
+def read_artifact(path, limit=OUTPUT_LIMIT):
+    """Read one bounded regular file from a local repair bundle."""
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, "rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise VerificationError("Repair artifacts must be regular files")
+        content = stream.read(limit + 1)
+    if len(content) > limit:
+        raise VerificationError("A repair artifact exceeded its size limit")
+    return content
+
+
+def capture_output(command, timeout):
+    """Enforce the output limit while the child is running."""
+    deadline = time.monotonic() + timeout
+    output = bytearray()
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as process:
+        try:
+            with selectors.DefaultSelector() as reader:
+                reader.register(process.stdout, selectors.EVENT_READ)
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0 or not reader.select(remaining):
+                        raise subprocess.TimeoutExpired(command, timeout)
+                    chunk = process.stdout.read1(min(8192, OUTPUT_LIMIT + 1 - len(output)))
+                    if not chunk:
+                        break
+                    output.extend(chunk)
+                    if len(output) > OUTPUT_LIMIT:
+                        raise VerificationError("The sandbox exceeded the output limit")
+            return process.wait(timeout=max(0, deadline - time.monotonic())), bytes(output)
+        finally:
+            if process.poll() is None:
+                process.kill()
+
+
+def prepare_sandbox_inputs(staged):
+    """Expose only the staging subtree to the unprivileged container user."""
+    if not stat.S_ISDIR(staged.lstat().st_mode):
+        raise VerificationError("The sandbox input root must be a regular directory")
+    for directory, subdirectories, filenames in os.walk(staged, followlinks=False):
+        for names, expected, mode in ((subdirectories, stat.S_ISDIR, 0o755), (filenames, stat.S_ISREG, 0o644)):
+            for name in names:
+                path = Path(directory) / name
+                if not expected(path.lstat().st_mode):
+                    raise VerificationError("Sandbox inputs must contain only regular files and directories")
+                path.chmod(mode)
+    staged.chmod(0o755)
+
+
 def run_phase(name, image, staged, tests, expected, expected_errors=(), *, timeout=30, module="pagination"):
     """Check exact pytest results or capture a passing baseline when expected is None."""
+    prepare_sandbox_inputs(staged)
     container = f"opr-pagination-{uuid.uuid4().hex}"
     command = [
         "docker", "run", "--rm", "--name", container, "--pull", "never",
@@ -80,10 +136,7 @@ def run_phase(name, image, staged, tests, expected, expected_errors=(), *, timeo
     ]
     print(f"\n{name}", flush=True)
     try:
-        with tempfile.TemporaryFile() as log:
-            result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
-            log.seek(0)
-            output = log.read(65_537)
+        returncode, output = capture_output(command, timeout)
     finally:
         # Killing a timed-out Docker client can leave its container running.
         subprocess.run(
@@ -91,8 +144,6 @@ def run_phase(name, image, staged, tests, expected, expected_errors=(), *, timeo
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10,
         )
 
-    if len(output) > 65_536:
-        raise VerificationError(f"{name} exceeded the output limit")
     report = output.decode(errors="replace")
     print(report, end="", flush=True)
     observed = TEST_RESULT.findall(report)
@@ -103,17 +154,30 @@ def run_phase(name, image, staged, tests, expected, expected_errors=(), *, timeo
         expected = dict.fromkeys((node for node, _ in observed), "PASSED")
     expected_exit = int("FAILED" in expected.values())
     if (
-        result.returncode != expected_exit
+        returncode != expected_exit
         or len(observed) != len(expected)
         or dict(observed) != expected
         or any(error not in report for error in expected_errors)
     ):
-        raise VerificationError(f"{name} returned unexpected test results (exit {result.returncode}).\n{report[-1600:]}")
+        raise VerificationError(f"{name} returned unexpected test results (exit {returncode}).\n{report[-1600:]}")
     return expected
 
 
-def committed_file(repository, revision, path):
-    return subprocess.check_output(["git", "-C", repository, "show", f"{revision}:{path}"], timeout=15)
+def committed_file(repository, revision, path, *, max_bytes=None):
+    git = ["git", "--no-replace-objects", "-C", repository, "cat-file"]
+    blob = f"{revision}:{path}"
+    if max_bytes is not None and int(subprocess.check_output([*git, "-s", blob], timeout=15)) > max_bytes:
+        raise VerificationError("A committed repair file exceeded its size limit")
+    return subprocess.check_output([*git, "blob", blob], timeout=15)
+
+
+def committed_paths(repository, revision, *roots):
+    paths = subprocess.check_output(
+        ["git", "--no-replace-objects", "-C", repository, "ls-tree", "--full-tree", "-r", "-z", "--name-only",
+         revision, "--", *roots],
+        timeout=15,
+    )
+    return [os.fsdecode(path) for path in paths.split(b"\0") if path]
 
 
 def stage_files(repository, revision, directory, paths, *, checkpoint=None):
@@ -121,7 +185,10 @@ def stage_files(repository, revision, directory, paths, *, checkpoint=None):
     for path in paths:
         if checkpoint is not None:
             checkpoint()
-        target = directory / path
+        relative = Path(path)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise VerificationError("A staged path must be relative to its checkout")
+        target = directory / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(committed_file(repository, revision, path))
 
@@ -321,7 +388,7 @@ def main():
 
         fixed = stage / "fixed"
         shutil.copytree(buggy, fixed)
-        subprocess.run(["git", "apply", FIXTURE / "reference.patch"], cwd=fixed, check=True)
+        subprocess.run(["git", "apply", FIXTURE / "reference.patch"], cwd=fixed, check=True, timeout=15)
         run_phase(
             "Bug reproduction", image, buggy, [CONTROL_FILE], dict.fromkeys(CONTROL_RESULTS, "FAILED"),
             ("assert 2 == 3", "assert 0 == 1"),

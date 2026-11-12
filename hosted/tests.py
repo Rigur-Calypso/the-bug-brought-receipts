@@ -165,10 +165,31 @@ class SampleFlowTests(TestCase):
                   'issue_snapshot_sha256': github_demo.APPROVED_ISSUE}
         live = dict(record, ref='main', base_sha='c' * 40)
         with (
-            patch('publish_repair.git', return_value=record['base_sha']),
+            patch('publish_repair.check_candidate_scope'),
             patch('publish_repair.scoped_installation', return_value=nullcontext(('test-token', 'demo[bot]'))),
             patch('publish_repair.github') as github,
         ):
             with self.assertRaisesMessage(github_demo.VerificationError, 'base or issue changed'):
                 github_demo.publish_verified(SimpleNamespace(repository='checkout'), case, record, lambda _token: live)
             github.assert_not_called()
+
+    def test_publisher_closes_a_new_draft_if_the_returned_base_changed(self):
+        case = dict(github_demo.CASE, branch='opr/browser-test')
+        record = {'base_sha': 'a' * 40, 'head_sha': 'b' * 40, 'branch': case['branch'],
+                  'issue_snapshot_sha256': github_demo.APPROVED_ISSUE}
+        live = dict(record, ref='main')
+        draft = {'number': 12, 'draft': True, 'user': {'login': 'demo[bot]'},
+                 'head': {'sha': record['head_sha']}, 'base': {'sha': 'c' * 40}}
+        with (
+            patch('publish_repair.check_candidate_scope'),
+            patch('publish_repair.scoped_installation', return_value=nullcontext(('test-token', 'demo[bot]'))),
+            patch('publish_repair.draft_body', return_value='Verified repair'),
+            patch('publish_repair.github', side_effect=[
+                {'object': {'sha': record['head_sha']}}, [], draft, {'state': 'closed'},
+            ]) as github,
+        ):
+            with self.assertRaisesMessage(github_demo.VerificationError, 'The new draft was closed.'):
+                github_demo.publish_verified(SimpleNamespace(repository='checkout'), case, record, lambda _token: live)
+            github.assert_called_with(
+                f"/repos/{case['repository']}/pulls/12", 'test-token', method='PATCH', data={'state': 'closed'},
+            )

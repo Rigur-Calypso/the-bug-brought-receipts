@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,11 @@ from hosted.models import Sample
 from hosted.worker import SampleFailure, run_next
 
 
+def stop_worker(signum, frame):
+    # Unwind the active Docker phase so it removes its container on launcher shutdown.
+    raise SystemExit(0)
+
+
 class Command(BaseCommand):
     help = 'Generate and verify repairs for the enrolled local samples.'
     requires_migrations_checks = True
@@ -26,6 +32,7 @@ class Command(BaseCommand):
         parser.add_argument('--once', action='store_true', help='Process at most one queued run.')
 
     def handle(self, *args, **options):
+        signal.signal(signal.SIGTERM, stop_worker)
         configured_repository = os.environ.get('OPR_SAMPLE_REPOSITORY')
         if not configured_repository:
             raise CommandError('Set OPR_SAMPLE_REPOSITORY to the local sample repository.')
@@ -60,7 +67,7 @@ class Command(BaseCommand):
         port = int(os.environ.get('OPR_OLLAMA_PORT', '11434'))
         try:
             subprocess.run(
-                ['git', '-C', repository, 'cat-file', '-e', f'{base}^{{commit}}'],
+                ['git', '--no-replace-objects', '-C', repository, 'cat-file', '-e', f'{base}^{{commit}}'],
                 check=True, capture_output=True, timeout=15,
             )
             image = build_image()

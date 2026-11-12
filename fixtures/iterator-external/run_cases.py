@@ -4,15 +4,14 @@ import argparse
 import ast
 import difflib
 import json
-import subprocess
 import sys
 import tempfile
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.with_name("pagination-smoke")))
-from pagination_generation import MODEL, propose
-from run_in_docker import VerificationError, build_image, run_phase, stage_files
+from pagination_generation import MODEL, propose, time_left
+from run_in_docker import VerificationError, build_image, committed_paths, run_phase, stage_files
 
 
 TEST = "generated_regression.py"
@@ -58,13 +57,15 @@ CASES = {
         "setup": "from more_itertools import exactly_n\n",
         "probes": {
             "negative_two": ("exactly_n([True], -2)", "False"),
+            "negative_many": ("exactly_n([True], -25)", "False"),
             "negative_one": ("exactly_n([True], -1)", "False"),
             "zero_matches": ("exactly_n([False], 0)", "True"),
             "positive_count": ("exactly_n([True, False, True], 2)", "True"),
         },
-        "failing": {"negative_two"},
+        "failing": {"negative_two", "negative_many"},
         "marker": "ValueError:",
         "parameter": "n",
+        "condition_choices": ["n < 0", "0 > n"],
         "description": "No iterable can contain a negative count of matching items. Return False for every "
                        "negative n before islice is called, preserving valid calls with zero and positive n.",
         "anchor": "return ilen(islice(filter(predicate, iterable), n + 1)) == n",
@@ -74,10 +75,7 @@ CASES = {
 
 def stage_checkout(repository, case, directory, checkpoint=None):
     package = case["path"].split("/")[0]
-    paths = subprocess.check_output(
-        ["git", "-C", repository, "ls-tree", "-r", "--name-only", case["base"], "--", package, "tests"],
-        text=True, timeout=15,
-    ).splitlines()
+    paths = committed_paths(repository, case["base"], package, "tests")
     stage_files(repository, case["base"], directory, paths, checkpoint=checkpoint)
     (directory / "iterator_probe.py").write_text(
         f'import {package}\nfrom pathlib import Path\n'
@@ -108,14 +106,16 @@ def validated_condition(raw, parameter):
 def run_case(name, repository, output, port, image, *, checkpoint=None):
     case = CASES[name]
     output.mkdir(parents=True)
+    deadline = time.monotonic() + 180
     with tempfile.TemporaryDirectory(prefix=f"opr-{name}-") as temp:
-        stage = Path(temp).resolve()
+        stage = Path(temp).resolve() / "work"
         stage_checkout(repository, case, stage, checkpoint)
 
         def check(label, paths, expected, markers=()):
             if checkpoint:
                 checkpoint()
-            return run_phase(f"{name}: {label}", image, stage, paths, expected, markers, module="iterator_probe")
+            return run_phase(f"{name}: {label}", image, stage, paths, expected, markers,
+                             timeout=time_left(deadline, 30), module="iterator_probe")
 
         def ask(prompt, schema, system):
             if checkpoint:
@@ -130,10 +130,9 @@ def run_case(name, repository, output, port, image, *, checkpoint=None):
         if ast.get_docstring(function):
             context = context.replace(ast.get_source_segment(source, function.body[0]), "", 1)
         baseline = check("upstream baseline", case["baseline"], None)
-        deadline = time.monotonic() + 180
         probes = case["probes"]
         selection = ask(
-            case["description"] + "\nSelect all four probe IDs, including compatibility checks: "
+            case["description"] + "\nSelect all listed probe IDs, including compatibility checks: "
             + ", ".join(probes),
             {"probes": {"type": "array", "items": {"type": "string", "enum": list(probes)}}},
             system="Select bounded tests for a Python iterator bug.",

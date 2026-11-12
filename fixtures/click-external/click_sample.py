@@ -1,13 +1,12 @@
 """Generate and verify a repair for Click's enum default in --help."""
 
 import difflib
-import subprocess
 import tempfile
 import time
 from pathlib import Path
 
-from pagination_generation import propose
-from run_in_docker import PYTHON_IMAGE, VerificationError, run_phase, stage_files
+from pagination_generation import propose, time_left
+from run_in_docker import PYTHON_IMAGE, VerificationError, committed_paths, run_phase, stage_files
 
 
 BASE = "fd183b2ced1cb5857784fe7fb22f4982f671f098"
@@ -74,10 +73,7 @@ def patched_source(source, renderer):
 
 def stage_checkout(repository, revision, stage, checkpoint):
     checkpoint()
-    paths = subprocess.check_output(
-        ["git", "-C", repository, "ls-tree", "-r", "--name-only", revision, "--", "src/click", "tests", "pyproject.toml"],
-        text=True, timeout=15,
-    ).splitlines()
+    paths = committed_paths(repository, revision, "src/click", "tests", "pyproject.toml")
     stage_files(repository, revision, stage, paths, checkpoint=checkpoint)
     (stage / "click_probe.py").write_text(
         'import sys\nfrom pathlib import Path\nsys.path.insert(0, "/work/src")\n'
@@ -86,15 +82,15 @@ def stage_checkout(repository, revision, stage, checkpoint):
 
 
 def run_click(repository, image, port, checkpoint):
+    deadline = time.monotonic() + 600
     with tempfile.TemporaryDirectory(prefix="opr-click-") as directory:
-        stage = Path(directory).resolve()
+        stage = Path(directory).resolve() / "work"
         stage_checkout(repository, BASE, stage, checkpoint)
 
         def check(label, paths, expected, markers=()):
             checkpoint()
-            return run_phase(label, image, stage, paths, expected, markers, module="click_probe")
-
-        deadline = time.monotonic() + 600
+            return run_phase(label, image, stage, paths, expected, markers,
+                             timeout=time_left(deadline, 30), module="click_probe")
 
         def ask(prompt, schema):
             checkpoint()

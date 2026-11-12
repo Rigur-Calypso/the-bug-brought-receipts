@@ -12,8 +12,8 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.with_name("pagination-smoke")))
-from pagination_generation import MODEL, propose
-from run_in_docker import DOCKERFILE, VerificationError, build_image, run_phase, stage_files
+from pagination_generation import MODEL, propose, time_left
+from run_in_docker import DOCKERFILE, VerificationError, build_image, committed_paths, run_phase, stage_files
 
 
 BASE = "2ddb5903cdc1c7e6eb6b083f4f99f73db50aecd9"
@@ -36,10 +36,7 @@ ARITHMETIC = (
 
 
 def stage_checkout(repo, destination, checkpoint=None):
-    paths = subprocess.check_output(
-        ["git", "-C", repo, "ls-tree", "-r", "--name-only", BASE, "--", "src/humanize", "tests"],
-        text=True, timeout=15,
-    ).splitlines()
+    paths = committed_paths(repo, BASE, "src/humanize", "tests")
     stage_files(repo, BASE, destination, paths, checkpoint=checkpoint)
     package = destination / "src/humanize"
     (package / "_version.py").write_text('__version__ = "4.15.0"\n')
@@ -95,15 +92,16 @@ def apply_proposal(source, proposal):
 def run_case(repo, output, port, *, image=None, checkpoint=None):
     output.mkdir(parents=True)
     image = image or build_image(dockerfile=HUMANIZE_DOCKERFILE)
+    deadline = time.monotonic() + 180
     with tempfile.TemporaryDirectory(prefix="opr-humanize-") as directory:
-        stage = Path(directory).resolve()
+        stage = Path(directory).resolve() / "work"
         stage_checkout(repo, stage, checkpoint)
-        deadline = time.monotonic() + 180
 
         def check(label, paths, expected, markers=()):
             if checkpoint:
                 checkpoint()
-            return run_phase(label, image, stage, paths, expected, markers, module="humanize_probe")
+            return run_phase(label, image, stage, paths, expected, markers,
+                             timeout=time_left(deadline, 30), module="humanize_probe")
 
         def ask(prompt, schema, system):
             if checkpoint:

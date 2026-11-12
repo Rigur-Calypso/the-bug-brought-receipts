@@ -7,7 +7,6 @@ import hashlib
 import io
 import json
 import shutil
-import subprocess
 import sys
 import tempfile
 import time
@@ -16,7 +15,9 @@ from pathlib import Path
 FIXTURE = Path(__file__).resolve().parent
 sys.path.insert(0, str(FIXTURE.with_name("pagination-smoke")))
 from pagination_generation import MODEL, propose, time_left
-from run_in_docker import BASELINE_RESULTS, VerificationError, build_image, committed_file, run_phase, stage_files
+from run_in_docker import (
+    BASELINE_RESULTS, VerificationError, build_image, committed_file, committed_paths, run_phase, stage_files,
+)
 
 
 REGRESSION = "generated_regression.py"
@@ -249,7 +250,7 @@ def verify_committed_showcase(repository, base, head, generation, output):
     }
     replay = dict(generation)
     for name, (revision, path, key) in exact_files.items():
-        content = committed_file(repository, revision, path)
+        content = committed_file(repository, revision, path, max_bytes=65_536)
         if hashlib.sha256(content).hexdigest() != generation[key]:
             raise VerificationError(f"Committed {name} differs from the verified showcase")
         replay[name] = content.decode()
@@ -259,12 +260,11 @@ def verify_committed_showcase(repository, base, head, generation, output):
     for revision in (base, head):
         if committed_file(repository, revision, baseline) != expected_baseline:
             raise VerificationError("The committed showcase baseline differs from the verified fixture")
-    gate = run_gate(output / f"commit-{head[:12]}", port=None, replay=replay)
+    directory = Path(tempfile.mkdtemp(prefix=f"commit-{head[:12]}-", dir=output))
+    gate = run_gate(directory / "evidence", port=None, replay=replay)
 
     suite = BASELINE_RESULTS | expected(baseline, BASELINE_NAMES)
-    prior_tests = subprocess.check_output(
-        ["git", "-C", repository, "ls-tree", "-r", "--name-only", base, "--", "tests"], text=True, timeout=15,
-    ).splitlines()
+    prior_tests = committed_paths(repository, base, "tests")
     smoke_regression = "tests/test_pagination_regression.py"
     if smoke_regression in prior_tests:
         suite.update(expected(smoke_regression, ("reported_partial_page", "generated_page_counts")))

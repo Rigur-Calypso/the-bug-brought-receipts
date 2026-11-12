@@ -36,7 +36,7 @@ Use the private GitHub App installed on the demo repository only. Give it
 Issues read, Contents read/write, and Pull requests read/write. Create
 `.local/github-demo.json` with numeric `app_id`, numeric `installation_id`,
 and `private_key` set to the absolute path of the App's private key. Keep the
-key outside this checkout. The sibling checkout must contain the current
+key outside this checkout and set its permissions to `600`. The sibling checkout must contain the current
 GitHub `main` commit and the fixture seed. If the local checkout falls behind,
 fetch `main` before starting a new run.
 

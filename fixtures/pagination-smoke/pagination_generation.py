@@ -3,7 +3,7 @@
 import ast
 import json
 import time
-from urllib.request import ProxyHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 
 MODEL = "llama3.2:latest"
@@ -21,10 +21,15 @@ CASE_SCHEMA = {
 }
 
 
+class RejectRedirects(HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        return None
+
+
 def time_left(deadline, limit):
     remaining = deadline - time.monotonic()
     if remaining <= 0:
-        raise TimeoutError("The ten-minute run budget expired")
+        raise TimeoutError("The verification run budget expired")
     return min(remaining, limit)
 
 
@@ -51,8 +56,13 @@ def propose(
         headers={"Content-Type": "application/json"},
     )
     # Keep fixture prompts local even if the shell has proxy variables.
-    with build_opener(ProxyHandler({})).open(request, timeout=time_left(deadline, timeout)) as response:
-        reply = json.loads(response.read(65_537))
+    with build_opener(ProxyHandler({}), RejectRedirects()).open(request, timeout=time_left(deadline, timeout)) as response:
+        body = response.read(65_537)
+    if len(body) > 65_536:
+        raise ValueError("The model reply exceeded the response limit")
+    reply = json.loads(body)
+    if not isinstance(reply, dict) or not isinstance(reply.get("response"), str):
+        raise ValueError("The model returned an unexpected response")
     proposal = json.loads(reply["response"])
     if not isinstance(proposal, dict) or proposal.keys() != properties.keys():
         raise ValueError("The model returned an unexpected proposal shape")
@@ -76,6 +86,10 @@ def render_regression(cases):
             raise ValueError(f"The expected page count in {case} disagrees with the issue contract")
     if REPORTED_CASE not in cases:
         raise ValueError("Include the issue's reported [21, 10, 3] case")
+    if len({tuple(case) for case in cases}) != len(cases):
+        raise ValueError("Include distinct pagination cases")
+    if not any(count == 0 for count, _, _ in cases) or not any(count and count % size == 0 for count, size, _ in cases):
+        raise ValueError("Cover both an empty list and a full page")
 
     lines = [
         "from pagination import page_count",

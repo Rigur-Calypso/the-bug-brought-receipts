@@ -1,13 +1,12 @@
 """Bounded local repairs for three pinned public Python releases."""
 
 import difflib
-import subprocess
 import tempfile
 import time
 from pathlib import Path
 
-from pagination_generation import propose
-from run_in_docker import DOCKERFILE, PYTHON_IMAGE, VerificationError, run_phase, stage_files
+from pagination_generation import propose, time_left
+from run_in_docker import DOCKERFILE, PYTHON_IMAGE, VerificationError, committed_paths, run_phase, stage_files
 
 
 DATEUTIL_DOCKERFILE = DOCKERFILE + "RUN python -m pip install --no-cache-dir six==1.17.0\n"
@@ -48,7 +47,6 @@ DATEUTIL_SCOPE = (
 CASES = {
     "attrs": {
         "base": "3dca08ce5bbe673d7df25f44f3dda92505d1043d",
-        "fixed": "9a98e00a7c078360add417c5d62db820d4645ab1",
         "report": "https://github.com/python-attrs/attrs/issues/1427",
         "path": "src/attr/_make.py",
         "module": "attrs",
@@ -73,7 +71,6 @@ CASES = {
     },
     "packaging": {
         "base": "3b77a26f5a27473ad3b08194d773f325d018a2d0",
-        "fixed": "c1a88a3e035e8bfe47dbc957f4a2493e8a7b4f3c",
         "report": "https://github.com/pypa/packaging/pull/1097",
         "path": "src/packaging/specifiers.py",
         "module": "packaging",
@@ -119,7 +116,6 @@ CASES = {
     },
     "dateutil": {
         "base": "03fa92bfedbe020724de5dde8864e3a9539162b4",
-        "fixed": "3ebfbe8385363d2f8a9fd9ff1b3857fbd5df7d5e",
         "report": "https://github.com/dateutil/dateutil/issues/658",
         "path": "dateutil/parser/isoparser.py",
         "module": "dateutil",
@@ -168,10 +164,7 @@ CASES = {
 
 def stage_checkout(repository, case, revision, stage, checkpoint):
     checkpoint()
-    paths = subprocess.check_output(
-        ["git", "-C", repository, "ls-tree", "-r", "--name-only", revision, "--", *case["paths"]],
-        text=True, timeout=15,
-    ).splitlines()
+    paths = committed_paths(repository, revision, *case["paths"])
     stage_files(repository, revision, stage, paths, checkpoint=checkpoint)
     module = case["module"]
     root = "/work/src" if case["path"].startswith("src/") else "/work"
@@ -204,14 +197,15 @@ def file_diff(path, original, changed):
 
 def run_release(name, repository, image, port, checkpoint):
     case = CASES[name]
+    deadline = time.monotonic() + 180
     with tempfile.TemporaryDirectory(prefix=f"opr-{name}-") as directory:
-        stage = Path(directory).resolve()
+        stage = Path(directory).resolve() / "work"
         stage_checkout(repository, case, case["base"], stage, checkpoint)
-        deadline = time.monotonic() + 180
 
         def check(label, paths, expected, markers=()):
             checkpoint()
-            return run_phase(f"{name}: {label}", image, stage, paths, expected, markers, module="release_probe")
+            return run_phase(f"{name}: {label}", image, stage, paths, expected, markers,
+                             timeout=time_left(deadline, 30), module="release_probe")
 
         def ask(prompt, schema):
             checkpoint()

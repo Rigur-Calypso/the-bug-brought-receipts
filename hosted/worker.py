@@ -62,6 +62,9 @@ def run_next(verify):
         pass
     except SampleFailure as error:
         message = str(error)
+    except SystemExit:
+        message = 'The local worker shut down. Start a new verification.'
+        raise
     except Exception as error:
         logger.error('Sample verification stopped: %s', type(error).__name__)
         message = 'The sample could not be verified. Ask the operator to check the worker.'
