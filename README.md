@@ -30,6 +30,19 @@ and select **Generate and test a fix**. Recent runs and downloads are saved loca
 `.local/sample.sqlite3`. Press Ctrl-C in the launcher terminal to stop the
 prototype, and run the same script to restart it.
 
+### Run a private demo in GitHub Codespaces
+
+Create a Codespace from this branch on a 2-core machine. Accept **Contents:
+read** for `Rigur-Calypso/museum-of-off-by-ones` when GitHub asks. The setup
+downloads Ollama and the model, then starts the worker and web app. Follow
+progress with `tail -f .local/codespaces.log` in the Codespace terminal.
+
+Open port **8765** from the **Ports** tab and keep its visibility private.
+Sign in as `local-operator` with the password in `.local/operator-password`
+and choose the local pagination sample. The other fixture checkouts and
+GitHub App publication are optional and require their setup below. Stop the
+Codespace when the demo ends to preserve your included compute quota.
+
 ### Repair the enrolled GitHub issue
 
 Use the private GitHub App installed on the demo repository only. Give it

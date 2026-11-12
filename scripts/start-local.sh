@@ -8,7 +8,7 @@ if ! "$python" -c 'import django' >/dev/null 2>&1; then
   echo 'Prepare .venv and install requirements-web.txt. See README.md.'
   exit 1
 fi
-docker info --format '{{.ServerVersion}}' >/dev/null || { echo 'Start Docker Desktop and try again.'; exit 1; }
+docker info --format '{{.ServerVersion}}' >/dev/null || { echo 'Start Docker and try again.'; exit 1; }
 
 local_dir="$PWD/.local"
 mkdir -p "$local_dir"
@@ -43,8 +43,12 @@ if ! ollama_ready 2>/dev/null; then
   done
 fi
 if ! ollama show llama3.2:latest >/dev/null 2>&1; then
-  echo "Install the model with OLLAMA_HOST=$OLLAMA_HOST ollama pull llama3.2:latest, then retry."
-  exit 1
+  if [[ "${CODESPACES:-}" == true ]]; then
+    ollama pull llama3.2:latest
+  else
+    echo "Install the model with OLLAMA_HOST=$OLLAMA_HOST ollama pull llama3.2:latest, then retry."
+    exit 1
+  fi
 fi
 
 if [[ ! -s "$local_dir/secret-key" ]]; then
@@ -71,7 +75,11 @@ PY
 worker_pid=$!
 "$python" -m django runserver "127.0.0.1:$web_port" --noreload >"$local_dir/web.log" 2>&1 &
 web_pid=$!
-echo "Open http://127.0.0.1:$web_port and sign in as local-operator."
+if [[ "${CODESPACES:-}" == true ]]; then
+  echo "Open forwarded port $web_port in the Ports tab and sign in as local-operator."
+else
+  echo "Open http://127.0.0.1:$web_port and sign in as local-operator."
+fi
 echo "Initial password file: $local_dir/operator-password"
 echo 'Press Ctrl-C to stop the preview.'
 while kill -0 "$worker_pid" 2>/dev/null && kill -0 "$web_pid" 2>/dev/null; do
