@@ -1,0 +1,76 @@
+{% extends 'hosted/base.html' %}
+{% block title %}{{ run.get_state_display }}{% endblock %}
+{% block content %}
+<p><a href="{% url 'sample-home' %}">← Sample repair</a></p>
+<h1>{{ run.get_state_display }}</h1>
+{% if run.github_issue %}
+<p><a href="{{ run.github_issue.issue.url }}">{{ run.github_issue.repository }} #{{ run.github_issue.issue.number }} · {{ run.github_issue.issue.title }}</a></p>
+{% else %}
+<p class="muted">{{ run.get_sample_display }}</p>
+{% endif %}
+<section class="panel" data-state="{{ run.state }}" data-status="{% url 'sample-status' run.pk %}">
+  {% if run.state == 'verified' %}
+  <h2>Fresh verification results</h2>
+  {% if run.evidence.patch %}
+  <p>The new regression reproduced the reported bug on the original commit and passed with the generated patch.</p>
+  {% else %}
+  <p>The regression reproduced the missing page on the original commit and passed on the recorded fix.</p>
+  {% endif %}
+  <ul>
+    <li>{{ run.evidence.passed.generated }} regression tests passed</li>
+    <li>{{ run.evidence.passed.original_suite }} original tests passed</li>
+    {% if run.evidence.passed.independent %}<li>{{ run.evidence.passed.independent }} independent check{{ run.evidence.passed.independent|pluralize }} passed</li>{% endif %}
+  </ul>
+  {% if run.evidence.scope_note %}<p class="muted">{{ run.evidence.scope_note }}</p>{% endif %}
+  {% if run.evidence.patch %}
+  <p>Base commit <code>{{ run.evidence.base_sha }}</code></p>
+  {% if run.github_issue %}
+  <p>Pagination dropped the remainder when dividing items by page size. The fix counts one more page when items remain.</p>
+  <p>Verified commit <code>{{ run.evidence.head_sha }}</code></p>
+  {% if run.draft_url %}
+  <p><a class="action" href="{{ run.draft_url }}">View draft pull request</a></p>
+  <p>Review the changes on GitHub before merging.</p>
+  {% else %}
+  {% if run.message %}<p role="alert">{{ run.message }}</p>{% endif %}
+  <form method="post" action="{% url 'github-publish' run.pk %}">
+    {% csrf_token %}<button>Open draft pull request</button>
+  </form>
+  {% endif %}
+  {% endif %}
+  <details><summary>Review the patch</summary><pre style="white-space: pre-wrap">{{ run.evidence.patch }}</pre></details>
+  <p>
+    <a class="action" href="{% url 'sample-download' run.pk 'patch' %}">Download patch</a>
+    <a class="action secondary" href="{% url 'sample-download' run.pk 'regression' %}">Download regression test</a>
+  </p>
+  {% else %}
+  {% comment %}Earlier preview runs contain replay evidence and the historical draft link.{% endcomment %}
+  {% if run.evidence.head_sha %}<p>Verified commit <code>{{ run.evidence.head_sha }}</code></p>{% endif %}
+  <a class="action" href="https://github.com/Rigur-Calypso/museum-of-off-by-ones/pull/4">Original draft PR</a>
+  <p class="muted">Published during the hackathon. Access requires permission to the sample repository.</p>
+  {% endif %}
+  {% elif run.message %}
+  <p>{{ run.message }}</p>
+  {% elif run.active %}
+  <p>The worker will save your result here. You can close this page.</p>
+  {% endif %}
+  {% if run.state == 'queued' or run.state == 'running' %}
+  <form method="post" action="{% url 'sample-cancel' run.pk %}">
+    {% csrf_token %}<button class="secondary">Cancel run</button>
+  </form>
+  {% endif %}
+</section>
+{% if run.active %}
+<script>
+  const panel = document.querySelector('[data-status]');
+  async function poll() {
+    try {
+      const response = await fetch(panel.dataset.status, {cache: 'no-store', redirect: 'manual', signal: AbortSignal.timeout(5000)});
+      if (response.type === 'opaqueredirect' || response.status === 404) { location.reload(); return; }
+      if (response.ok && (await response.json()).state !== panel.dataset.state) { location.reload(); return; }
+    } catch { /* A later poll can recover after a connection drop. */ }
+    setTimeout(poll, 2500);
+  }
+  setTimeout(poll, 2500);
+</script>
+{% endif %}
+{% endblock %}

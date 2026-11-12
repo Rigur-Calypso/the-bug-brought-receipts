@@ -7,6 +7,124 @@ repair with a local model, verifies the exact candidate in Docker, and opens
 a draft pull request through a repository-scoped GitHub App. A human reviewer
 controls the merge on the protected default branch.
 
+## Run the local browser prototype
+
+The prototype uses Ollama to generate a patch and regression test for one of
+eight enrolled samples. Docker runs the test on the original code and
+checks the generated fix. Download both files from the verified result.
+
+Use a running Docker Desktop installation, Ollama with `llama3.2:latest`,
+and a sibling checkout of `museum-of-off-by-ones` containing the seed commit.
+Set `OPR_SAMPLE_REPOSITORY` if your checkout lives elsewhere. On a fresh
+checkout, prepare the virtual environment once.
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-web.txt
+./scripts/start-local.sh
+```
+
+Open [the prototype](http://127.0.0.1:8765) and sign in as `local-operator`
+with the generated password in `.local/operator-password`. Choose a sample
+and select **Generate and test a fix**. Recent runs and downloads are saved locally in
+`.local/sample.sqlite3`. Press Ctrl-C in the launcher terminal to stop the
+prototype, and run the same script to restart it.
+
+### Run a private demo in GitHub Codespaces
+
+Create a Codespace from this branch on a 2-core machine. Accept **Contents:
+read** for `Rigur-Calypso/museum-of-off-by-ones` when GitHub asks. The setup
+downloads Ollama and the model, then starts the worker and web app. Follow
+progress with `tail -f .local/codespaces.log` in the Codespace terminal.
+
+Open port **8765** from the **Ports** tab and keep its visibility private.
+Sign in as `local-operator` with the password in `.local/operator-password`
+and choose the local pagination sample. The other fixture checkouts and
+GitHub App publication are optional and require their setup below. Stop the
+Codespace when the demo ends to preserve your included compute quota.
+
+### Repair the enrolled GitHub issue
+
+Use the private GitHub App installed on the demo repository only. Give it
+Issues read, Contents read/write, and Pull requests read/write. Create
+`.local/github-demo.json` with numeric `app_id`, numeric `installation_id`,
+and `private_key` set to the absolute path of the App's private key. Keep the
+key outside this checkout and set its permissions to `600`. The sibling checkout must contain the current
+GitHub `main` commit and the fixture seed. If the local checkout falls behind,
+fetch `main` before starting a new run.
+
+Sign in as `local-operator`, open **View GitHub issue**, and select **Generate
+and test a fix**. The worker records the issue and current commit, then
+retests the exact candidate commit in Docker. Choose **Open draft pull request**
+from the verified result. Retrying that run uses the same candidate and branch.
+The App refuses publication if the issue or base changed during the run.
+Review the draft on GitHub using the repository's protected-branch workflow.
+
+This path uses the demo issue and the local operator account. Customer GitHub
+sign-in, repository installation, and an internet-accessible deployment are
+separate release milestones.
+
+To enable the public repository samples on another checkout, fetch the pinned
+releases below. The Humanize sample uses Gettext's `msgfmt` to compile its
+translation fixtures. Repositories can also be set through
+`OPR_<SAMPLE>_REPOSITORY`, such as `OPR_CLICK_REPOSITORY`.
+
+```sh
+git clone --depth 1 --branch 8.2.1 https://github.com/pallets/click.git .local/click-8.2.1
+git clone --depth 1 --branch 25.3.0 https://github.com/python-attrs/attrs.git .local/attrs-25.3.0
+git clone --depth 1 --branch 26.0 https://github.com/pypa/packaging.git .local/packaging-26.0
+git clone --depth 1 --branch 2.7.5 https://github.com/dateutil/dateutil.git .local/dateutil-2.7.5
+git clone --depth 1 --branch 4.15.0 https://github.com/python-humanize/humanize.git .local/humanize-4.15.0
+git clone --depth 1 --branch 26.2.0 https://github.com/mahmoud/boltons.git .local/boltons-26.2.0
+git clone --depth 1 --branch v10.8.0 https://github.com/more-itertools/more-itertools.git .local/more-itertools-10.8.0
+```
+
+The browser runs report the selected upstream checks for each sample. The
+packaging and dateutil patches update exact historical test expectations
+to match their verified fixed releases.
+
+The launcher uses a loopback Ollama endpoint on port 11435 and starts Ollama
+if needed. If the model is missing, follow its local download command. Use
+`OPR_OLLAMA_PORT` or `OPR_WEB_PORT` to choose a different local port.
+Run the web tests with
+`OPR_LOCAL_SECRET_KEY=local-test-only .venv/bin/python -m django test hosted --settings=hosted.settings`.
+
+## Try the external repository experiments
+
+The Humanize case uses the same local model client and Docker verifier on
+the pinned 4.15.0 release. It targets the historical
+[negative mixed-fraction bug](https://github.com/python-humanize/humanize/pull/320).
+The case adapter supplies the expected behavior and limits the model to one
+numeric expression. Run it from this repository with Docker, Ollama on port
+11435, and Gettext's `msgfmt` on your path.
+
+```sh
+git clone --depth 1 --branch 4.15.0 https://github.com/python-humanize/humanize.git ../humanize-4.15.0
+python3 fixtures/humanize-external/run_case.py ../humanize-4.15.0 --output runs/humanize-check
+```
+
+The run saves a source patch, the generated regression, and test evidence in
+the output directory. Choose a new output directory for each run.
+
+Run the Humanize tests against three deliberately wrong formatting repairs
+with the control script. The added `-1.75` check catches a patch that
+hardcodes negative numerators to one.
+
+```sh
+python3 fixtures/humanize-external/check_controls.py ../humanize-4.15.0 runs/humanize-check --output runs/humanize-controls
+```
+
+The iterator cases use pinned Boltons 26.2.0 and more-itertools 10.8.0
+checkouts. Each runs the reported regression and selected upstream tests.
+The Boltons model chooses between two allowed identity comparisons.
+
+```sh
+git clone --depth 1 --branch 26.2.0 https://github.com/mahmoud/boltons.git ../boltons-26.2.0
+git clone --depth 1 --branch v10.8.0 https://github.com/more-itertools/more-itertools.git ../more-itertools-10.8.0
+python3 fixtures/iterator-external/run_cases.py boltons ../boltons-26.2.0 --output runs/boltons-check
+python3 fixtures/iterator-external/run_cases.py more_itertools ../more-itertools-10.8.0 --output runs/more-itertools-check
+```
+
 ## What we verified
 
 | Case | Measured evidence | GitHub |
@@ -115,6 +233,10 @@ repair branches, so use the recorded PR links when presenting this run.
 
 ## Source map
 
+- `scripts/start-local.sh` starts the loopback web server and the repair worker.
+- `hosted/views.py` handles sign-in protection, run requests, and downloads.
+- `hosted/worker.py` claims runs and saves results. The
+  `sample_worker` command stages the fixture and calls the shared verifier.
 - `issue_intake.py` reads the two enrolled GitHub issues and records the exact base.
 - `fixtures/pagination-smoke/` contains the Docker worker, the pagination
   generation flow, and the shared publisher.

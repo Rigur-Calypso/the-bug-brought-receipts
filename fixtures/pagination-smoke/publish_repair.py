@@ -5,25 +5,30 @@ import base64
 import fcntl
 import hashlib
 import json
+import logging
 import os
-import shutil
+import re
 import ssl
+import stat
 import subprocess
 import sys
 import tempfile
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import HTTPSHandler, Request, build_opener
 
 import certifi
 
-from run_in_docker import VerificationError, verify_committed_repair
+from pagination_generation import MODEL, RejectRedirects, patch_source, render_regression
+from run_in_docker import VerificationError, committed_file, read_artifact, verify_committed_repair
 
 
 FIXTURE = Path(__file__).resolve().parent
 SHOWCASE = "score-summary-showcase"
+SHA = re.compile(r"[0-9a-f]{40}")
 
 
 def github(path, token, *, method="GET", data=None, missing=False):
@@ -40,7 +45,8 @@ def github(path, token, *, method="GET", data=None, missing=False):
         },
     )
     try:
-        with urlopen(request, context=ssl.create_default_context(cafile=certifi.where()), timeout=20) as response:
+        tls = HTTPSHandler(context=ssl.create_default_context(cafile=certifi.where()))
+        with build_opener(tls, RejectRedirects()).open(request, timeout=20) as response:
             return None if response.status == 204 else json.load(response)
     except HTTPError as error:
         if missing and error.code == 404:
@@ -52,7 +58,10 @@ def b64url(data):
     return base64.urlsafe_b64encode(data).rstrip(b"=")
 
 
-def app_token(args, owner, repository):
+def app_token(args, owner, repository, *, write=True):
+    key_mode = args.private_key.stat().st_mode
+    if not stat.S_ISREG(key_mode) or key_mode & 0o077:
+        raise VerificationError("The GitHub App key must be a private regular file. Set its permissions to 600.")
     now = int(time.time())
     unsigned = b".".join((
         b64url(b'{"alg":"RS256","typ":"JWT"}'),
@@ -73,16 +82,34 @@ def app_token(args, owner, repository):
         or installation.get("suspended_at") is not None
     ):
         raise VerificationError("GitHub did not confirm the expected App installation")
+    access = "write" if write else "read"
     credentials = github(
         f"/app/installations/{args.installation_id}/access_tokens", jwt, method="POST",
-        data={"repositories": [repository], "permissions": {"contents": "write", "issues": "read", "pull_requests": "write"}},
+        data={"repositories": [repository], "permissions": {"contents": access, "issues": "read", "pull_requests": access}},
     )
     return credentials["token"], f"{app['slug']}[bot]"
 
 
-def git(repository, *arguments):
+@contextmanager
+def scoped_installation(args, full_name, *, write=True):
+    owner, repository = full_name.split("/")
+    token, author = app_token(args, owner, repository, write=write)
+    try:
+        scope = github("/installation/repositories", token)
+        if scope["total_count"] != 1 or scope["repositories"][0]["full_name"].casefold() != full_name.casefold():
+            raise VerificationError("The publisher token must be scoped to the demo repository")
+        yield token, author
+    finally:
+        try:
+            github("/installation/token", token, method="DELETE")
+        except (OSError, VerificationError):
+            logging.getLogger(__name__).warning("Could not revoke the GitHub installation token")
+
+
+def git(repository, *arguments, env=None):
     return subprocess.check_output(
-        ["git", "-C", repository, *arguments], text=True, timeout=30,
+        ["git", "--no-replace-objects", "-C", repository, "-c", "core.hooksPath=/dev/null", *arguments],
+        text=True, timeout=30, env=env,
     ).strip()
 
 
@@ -92,25 +119,58 @@ def intake_issue(issue_url):
     ))
 
 
-def prepare_commit(repository, run, base, case):
-    with tempfile.TemporaryDirectory(prefix="opr-demo-commit-") as directory:
-        checkout = Path(directory) / "checkout"
-        git(repository, "worktree", "add", "--detach", str(checkout), base)
-        try:
-            patch = str(run / "candidate.patch")
-            scope = f"--include={case['source']}"
-            git(checkout, "apply", "--check", scope, patch)
-            git(checkout, "apply", scope, patch)
-            regression = checkout / case["regression"]
-            if (checkout / case["source"]).is_symlink() or regression.exists() or regression.is_symlink():
-                raise VerificationError("The source and new regression must be regular files")
-            shutil.copyfile(run / "generated_regression.py", regression)
-            git(checkout, "add", "--", case["source"], case["regression"])
-            git(checkout, "diff", "--cached", "--check")
-            git(checkout, "-c", "commit.gpgsign=false", "commit", "-m", case["title"])
-            return git(checkout, "rev-parse", "HEAD")
-        finally:
-            git(repository, "worktree", "remove", "--force", str(checkout))
+def prepare_commit(repository, run, base, case, *, checkpoint=None):
+    source, regression = case["source"], case["regression"]
+    with tempfile.TemporaryDirectory(prefix="opr-demo-commit-") as temp:
+        directory = Path(temp).resolve()
+        patch, frozen = directory / "candidate.patch", directory / "generated_regression.py"
+        for path in (patch, frozen):
+            path.write_bytes(read_artifact(run / path.name))
+        identity = {"NAME": "OpenPRBugResolver", "EMAIL": "openprbugresolver@users.noreply.github.com"}
+        env = dict(os.environ, GIT_INDEX_FILE=str(directory / "index"))
+        env.update({f"GIT_{role}_{field}": value for role in ("AUTHOR", "COMMITTER") for field, value in identity.items()})
+
+        def index(*arguments):
+            if checkpoint is not None:
+                checkpoint()
+            return git(repository, *arguments, env=env)
+
+        source_entry = index("ls-tree", base, "--", source)
+        if not source_entry.startswith("100644 blob ") or index("ls-tree", base, "--", regression):
+            raise VerificationError("The base must contain the regular source and no regression file")
+        # Use a private index so fixture checkout and clean/smudge filters never run.
+        index("read-tree", base)
+        index("apply", "--cached", f"--include={source}", str(patch))
+        blob = index("hash-object", "-w", "--no-filters", str(frozen))
+        index("update-index", "--add", "--cacheinfo", f"100644,{blob},{regression}")
+        index("diff", "--cached", "--check", base)
+        tree = index("write-tree")
+        return index("-c", "commit.gpgsign=false", "commit-tree", tree, "-p", base, "-m", case["title"])
+
+
+def check_candidate_scope(repository, base, head, case):
+    if not all(isinstance(sha, str) and SHA.fullmatch(sha) for sha in (base, head)):
+        raise VerificationError("Publication requires full commit IDs")
+    if git(repository, "rev-list", "--parents", "-n", "1", head).split() != [head, base]:
+        raise VerificationError("The candidate must have exactly the pinned base as its parent")
+    paths = {case["source"], case["regression"]}
+    changed = git(repository, "diff", "--no-renames", "--name-only", "-z", base, head)
+    entries = git(repository, "ls-tree", head, "--", *sorted(paths)).splitlines()
+    if set(changed.rstrip("\0").split("\0")) != paths or len(entries) != len(paths) or any(
+        not entry.startswith("100644 blob ") for entry in entries
+    ):
+        raise VerificationError("The candidate must change only the enrolled regular source and regression files")
+
+
+def verify_pagination_artifacts(repository, base, head, case, generation):
+    approved = {item["phase"]: item["proposal"] for item in generation["attempts"] if item.get("verified")}
+    original = committed_file(repository, base, case["source"], max_bytes=65_536).decode()
+    source = patch_source(original, approved["patch"]["expression"])
+    regression = render_regression(approved["regression"]["cases"])
+    if any(committed_file(repository, head, case[key], max_bytes=65_536) != content.encode() for key, content in (
+        ("source", source), ("regression", regression),
+    )):
+        raise VerificationError("The commit differs from the bounded pagination proposal")
 
 
 def draft_body(record):
@@ -151,10 +211,8 @@ def draft_body(record):
 
 
 def publish(args, case, issue_url):
-    owner, repository = case["repository"].split("/")
-    repo_api = f"/repos/{case['repository']}"
-    generation = json.loads((args.run / "evidence.json").read_text())
-    if generation["status"] != "verified":
+    generation = json.loads(read_artifact(args.run / "evidence.json"))
+    if generation["status"] != "verified" or generation["model"] != MODEL:
         raise VerificationError("Use verified generation evidence for the enrolled case")
 
     current = intake_issue(issue_url)
@@ -168,6 +226,7 @@ def publish(args, case, issue_url):
         if snapshot["body"].strip() != contract.read_text().strip():
             raise VerificationError("The live issue differs from the verified showcase contract")
     else:
+        # The original smoke run captured its issue before the publication label was added.
         prior_snapshot = dict(snapshot, labels=[name for name in snapshot["labels"] if name.casefold() != "opr:fix"])
         prior_digest = hashlib.sha256(json.dumps(prior_snapshot, sort_keys=True).encode()).hexdigest()
         if generation["base_sha"] != case["seed_sha"] or generation["issue_snapshot_sha256"] not in {prior_digest, current["issue_snapshot_sha256"]}:
@@ -177,58 +236,72 @@ def publish(args, case, issue_url):
 
     plan = args.run / "publication.json"
     if plan.exists():
-        record = json.loads(plan.read_text())
+        record = json.loads(read_artifact(plan))
         if record["base_sha"] != base or record["issue_snapshot_sha256"] != current["issue_snapshot_sha256"]:
             raise VerificationError("The recorded publication has a stale base or issue")
         head = record["head_sha"]
     else:
         head = prepare_commit(args.repository, args.run, base, case)
-        if set(git(args.repository, "diff", "--name-only", base, head).splitlines()) != {case["source"], case["regression"]}:
-            raise VerificationError("The candidate must change only the enrolled source and its new regression")
-        if args.profile == SHOWCASE:
-            sys.path.insert(0, str(FIXTURE.with_name(SHOWCASE)))
-            from run_gate import verify_committed_showcase
+    check_candidate_scope(args.repository, base, head, case)
+    if args.profile == SHOWCASE:
+        sys.path.insert(0, str(FIXTURE.with_name(SHOWCASE)))
+        from run_gate import verify_committed_showcase
 
-            checks = verify_committed_showcase(args.repository, base, head, generation, args.run)
-        else:
-            checks = verify_committed_repair(args.repository, base, head, generation["regression_sha256"])
-        record = {
-            "base_sha": base,
-            "head_sha": head,
-            "branch": branch,
-            "profile": args.profile,
-            "issue_snapshot_sha256": current["issue_snapshot_sha256"],
-            "run_owner": current["run_owner"],
-            "model": generation["model"],
-            **checks,
-        }
-        temporary_plan = plan.with_suffix(".tmp")
-        temporary_plan.write_text(json.dumps(record, indent=2) + "\n")
-        temporary_plan.replace(plan)
+        checks = verify_committed_showcase(args.repository, base, head, generation, args.run)
+    else:
+        verify_pagination_artifacts(args.repository, base, head, case, generation)
+        checks = verify_committed_repair(args.repository, base, head, generation["regression_sha256"])
+    record = {
+        "base_sha": base,
+        "head_sha": head,
+        "branch": branch,
+        "profile": args.profile,
+        "issue_snapshot_sha256": current["issue_snapshot_sha256"],
+        "run_owner": current["run_owner"],
+        "model": MODEL,
+        **checks,
+    }
+    # Persist the verified head before the first write to GitHub. Create the temporary file exclusively.
+    with tempfile.NamedTemporaryFile(mode="w", dir=args.run, prefix=".publication-", delete=False) as temporary:
+        temporary_plan = Path(temporary.name)
+        try:
+            temporary.write(json.dumps(record, indent=2) + "\n")
+            temporary.close()
+            temporary_plan.replace(plan)
+        finally:
+            temporary_plan.unlink(missing_ok=True)
 
-    if git(args.repository, "rev-parse", f"{head}^") != base or record["branch"] != branch:
+    draft_url = publish_verified(args, case, record, lambda _token: intake_issue(issue_url))
+    print(f"Verified draft {draft_url} at {head}")
+
+
+def publish_verified(args, case, record, read_current):
+    """Publish the exact verified head, or recover its existing draft after a retry."""
+    owner = case["repository"].split("/")[0]
+    repo_api = f"/repos/{case['repository']}"
+    head, base, branch = record["head_sha"], record["base_sha"], case["branch"]
+    if record["branch"] != branch:
         raise VerificationError("The recorded candidate does not match the pinned base and branch")
+    check_candidate_scope(args.repository, base, head, case)
 
-    token, author = app_token(args, owner, repository)
-    try:
-        scope = github("/installation/repositories", token)
-        if scope["total_count"] != 1 or scope["repositories"][0]["full_name"].casefold() != case["repository"].casefold():
-            raise VerificationError("The publisher token must be scoped to the demo repository")
-
+    with scoped_installation(args, case["repository"]) as (token, author):
         def check_current():
-            main = github(f"{repo_api}/git/ref/heads/main", token)
-            live = intake_issue(issue_url)
-            if main["object"]["sha"] != base or live["base_sha"] != base or live["issue_snapshot_sha256"] != record["issue_snapshot_sha256"]:
+            live = read_current(token)
+            if live["ref"] != "main" or live["base_sha"] != base or live["issue_snapshot_sha256"] != record["issue_snapshot_sha256"]:
                 raise VerificationError("The base or issue changed before publication")
 
         check_current()
         branch_ref = f"refs/heads/{branch}"
         remote = github(f"{repo_api}/git/ref/heads/{branch}", token, missing=True)
         if remote is None:
+            # An empty expected ref makes this a create-only push if another publisher races us.
             env = dict(os.environ, GH_TOKEN=token, GIT_TERMINAL_PROMPT="0")
             subprocess.run(
                 [
-                    "git", "-C", args.repository, "-c", "credential.helper=",
+                    "git", "--no-replace-objects", "-C", args.repository, "-c", "credential.helper=",
+                    "-c", "core.hooksPath=/dev/null",
+                    "-c", "protocol.allow=never", "-c", "protocol.https.allow=always",
+                    "-c", "http.followRedirects=false",
                     "-c", "credential.helper=!gh auth git-credential", "push",
                     f"--force-with-lease={branch_ref}:",
                     f"https://github.com/{case['repository']}.git", f"{head}:{branch_ref}",
@@ -249,14 +322,30 @@ def publish(args, case, issue_url):
             data={"title": case["title"], "body": draft_body(record),
                   "base": "main", "head": branch, "draft": True},
         )
-        if (
-            draft["head"]["sha"] != head or draft["base"]["sha"] != base
-            or draft["user"]["login"].casefold() != author.casefold() or not draft["draft"]
-        ):
+        number = int(draft["number"])
+        own_draft = draft["user"]["login"].casefold() == author.casefold() and draft["draft"]
+        if draft["head"]["sha"] != head or draft["base"]["sha"] != base or not own_draft:
+            if not existing and own_draft:
+                try:
+                    closed = github(f"{repo_api}/pulls/{number}", token, method="PATCH", data={"state": "closed"})
+                    if closed.get("state") != "closed":
+                        raise VerificationError("GitHub did not confirm that the draft closed")
+                except (VerificationError, OSError) as error:
+                    raise VerificationError(f"GitHub refs changed. Check draft #{number} before retrying.") from error
+                raise VerificationError("GitHub refs changed while creating the draft. The new draft was closed.")
             raise VerificationError("GitHub returned a PR with unexpected revision, author, or draft state")
-        print(f"Verified draft {draft['html_url']} at {head}")
-    finally:
-        github("/installation/token", token, method="DELETE")
+        return f"https://github.com/{case['repository']}/pull/{number}"
+
+
+@contextmanager
+def publication_lock(repository, issue_number):
+    common_dir = Path(git(repository, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    with (common_dir / f"opr-issue-{issue_number}-publish.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise VerificationError("Publication is already in progress for this issue. Retry shortly.") from error
+        yield
 
 
 def main():
@@ -271,17 +360,12 @@ def main():
     args.run = args.run.resolve()
     case = json.loads((FIXTURE.with_name(args.profile) / "case.json").read_text())
     issue_url = f"https://github.com/{case['repository']}/issues/{case['issue_number']}"
-    common_dir = Path(git(args.repository, "rev-parse", "--path-format=absolute", "--git-common-dir"))
-    with (common_dir / f"opr-issue-{case['issue_number']}-publish.lock").open("a") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as error:
-            raise VerificationError("A publisher already holds the issue's publication lock") from error
+    with publication_lock(args.repository, case["issue_number"]):
         publish(args, case, issue_url)
 
 
 if __name__ == "__main__":
     try:
         main()
-    except (VerificationError, OSError, subprocess.SubprocessError) as error:
+    except (VerificationError, OSError, subprocess.SubprocessError, ValueError, TypeError, KeyError) as error:
         raise SystemExit(str(error)) from error

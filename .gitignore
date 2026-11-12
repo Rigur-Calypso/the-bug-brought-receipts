@@ -7,3 +7,5 @@ runs/
 *.pem
 *.key
 .DS_Store
+sample.sqlite3*
+.local/

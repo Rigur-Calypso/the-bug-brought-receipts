@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{% block title %}Sample repair{% endblock %} · OpenPRBugResolver</title>
+  <style>
+    :root { color-scheme: dark; font-family: Geist, system-ui, sans-serif; color: #edf5f2; background: #111816; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    header, main { max-width: 48rem; padding: 1.25rem; margin: auto; }
+    header { display: flex; gap: .75rem; align-items: center; justify-content: space-between; }
+    header a { color: inherit; font-weight: 750; text-decoration: none; }
+    h1 { font-size: clamp(2rem, 6vw, 3rem); letter-spacing: -.045em; line-height: 1.08; }
+    h2 { font-size: 1.15rem; }
+    p, li { line-height: 1.6; }
+    .muted { color: #b5c8c1; }
+    .panel { background: #1c2723; border: 1px solid #35473f; border-radius: .9rem; padding: 1.2rem; margin: 1.5rem 0; }
+    .panel > :first-child { margin-top: 0; }
+    .panel > :last-child { margin-bottom: 0; }
+    a { color: #9ff4cd; }
+    button, .action { display: inline-flex; align-items: center; min-height: 44px; border: 1px solid transparent; border-radius: .55rem; padding: .55rem .85rem; background: #a7f2cd; color: #14291e; font: inherit; font-weight: 700; text-decoration: none; cursor: pointer; }
+    .secondary { background: transparent; border-color: #52675d; color: #edf5f2; }
+    input, select { display: block; width: 100%; min-height: 44px; padding: .55rem; margin-top: .25rem; font: inherit; border-radius: .4rem; border: 1px solid #52675d; background: #111816; color: inherit; }
+    :focus-visible { outline: 3px solid #ffc57e; outline-offset: 3px; }
+    ul { padding-left: 1.2rem; }
+    code { overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="{% url 'sample-home' %}">OpenPRBugResolver</a>
+    {% if request.user.is_authenticated %}
+    <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="secondary">Sign out</button></form>
+    {% endif %}
+  </header>
+  <main>{% block content %}{% endblock %}</main>
+</body>
+</html>

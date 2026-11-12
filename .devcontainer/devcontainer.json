@@ -1,0 +1,20 @@
+{
+  "name": "OpenPRBugResolver demo",
+  "build": { "dockerfile": "Dockerfile" },
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "hostRequirements": { "cpus": 2, "memory": "8gb", "storage": "32gb" },
+  "forwardPorts": [8765],
+  "portsAttributes": {
+    "8765": { "label": "OpenPRBugResolver", "onAutoForward": "notify" }
+  },
+  "customizations": {
+    "codespaces": {
+      "repositories": {
+        "Rigur-Calypso/museum-of-off-by-ones": { "permissions": { "contents": "read" } }
+      }
+    }
+  },
+  "postStartCommand": "umask 077; mkdir -p .local; nohup bash .devcontainer/start-demo.sh >.local/codespaces.log 2>&1 </dev/null &"
+}

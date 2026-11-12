@@ -29,7 +29,9 @@ def github_get(path):
     return json.loads(result.stdout)
 
 
-def read_issue(issue_url, *, seed=False):
+def read_issue(issue_url, *, seed=False, get=None, run_owner=None):
+    """Resolve one enrolled issue and pin the source revision and issue text."""
+    get = get or github_get
     requested = issue_url.rstrip("/").casefold()
     for case_path in CASE_PATHS:
         case = json.loads(case_path.read_text())
@@ -42,7 +44,7 @@ def read_issue(issue_url, *, seed=False):
     number = case["issue_number"]
 
     repo_path = f"repos/{repository}"
-    issue = github_get(f"{repo_path}/issues/{number}")
+    issue = get(f"{repo_path}/issues/{number}")
     if (
         issue["number"] != number
         or issue["html_url"].casefold() != approved_url.casefold()
@@ -52,11 +54,12 @@ def read_issue(issue_url, *, seed=False):
         raise IntakeError("The approved URL must refer to the original open GitHub issue")
 
     labels = sorted(label["name"] for label in issue["labels"])
+    # Seed runs may reproduce a fixture before the maintainer approves publication.
     if not seed and REQUIRED_LABEL not in {label.casefold() for label in labels}:
         raise IntakeError(f"The approved issue needs the {REQUIRED_LABEL} label")
 
-    ref = case["seed_sha"] if seed else github_get(repo_path)["default_branch"]
-    base_sha = github_get(f"{repo_path}/commits/{quote(ref, safe='')}")["sha"]
+    ref = case["seed_sha"] if seed else get(repo_path)["default_branch"]
+    base_sha = get(f"{repo_path}/commits/{quote(ref, safe='')}")["sha"]
     if not re.fullmatch(r"[0-9a-f]{40}", base_sha) or (seed and base_sha != ref):
         raise IntakeError("GitHub returned an unexpected commit for this case")
 
@@ -72,8 +75,9 @@ def read_issue(issue_url, *, seed=False):
         "repository": repository,
         "profile": case_path.parent.name,
         "mode": "seed" if seed else "default_branch",
+        "ref": ref,
         "base_sha": base_sha,
-        "run_owner": github_get("user")["login"],
+        "run_owner": run_owner or get("user")["login"],
         "issue_snapshot_sha256": hashlib.sha256(json.dumps(snapshot, sort_keys=True).encode()).hexdigest(),
         "issue": snapshot,
     }
